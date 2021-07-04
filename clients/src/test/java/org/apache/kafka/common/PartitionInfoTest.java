@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.common;
 
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.Assert;
+import org.junit.Test;
 
 public class PartitionInfoTest {
 
@@ -36,7 +35,7 @@ public class PartitionInfoTest {
 
         String expected = String.format("Partition(topic = %s, partition = %d, leader = %s, replicas = %s, isr = %s, offlineReplicas = %s)",
                 topic, partition, leader.idString(), "[0,1,2]", "[0,1]", "[2]");
-        assertEquals(expected, partitionInfo.toString());
+        Assert.assertEquals(expected, partitionInfo.toString());
     }
 
 }

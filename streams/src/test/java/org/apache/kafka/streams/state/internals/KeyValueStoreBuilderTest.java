@@ -34,13 +34,8 @@ import org.junit.runner.RunWith;
 
 import java.util.Collections;
 
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
-import static org.junit.Assert.assertThrows;
 
 @RunWith(EasyMockRunner.class)
 public class KeyValueStoreBuilderTest {
@@ -55,7 +50,6 @@ public class KeyValueStoreBuilderTest {
     public void setUp() {
         EasyMock.expect(supplier.get()).andReturn(inner);
         EasyMock.expect(supplier.name()).andReturn("name");
-        expect(supplier.metricsScope()).andReturn("metricScope");
         EasyMock.replay(supplier);
         builder = new KeyValueStoreBuilder<>(
             supplier,
@@ -120,37 +114,29 @@ public class KeyValueStoreBuilderTest {
     }
 
     @SuppressWarnings("all")
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfInnerIsNull() {
-        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(null, Serdes.String(),
-            Serdes.String(), new MockTime()));
+        new KeyValueStoreBuilder<>(null, Serdes.String(), Serdes.String(), new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfKeySerdeIsNull() {
-        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, null, Serdes.String(), new MockTime()));
+        new KeyValueStoreBuilder<>(supplier, null, Serdes.String(), new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfValueSerdeIsNull() {
-        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), null, new MockTime()));
+        new KeyValueStoreBuilder<>(supplier, Serdes.String(), null, new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfTimeIsNull() {
-        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null));
+        new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null);
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfMetricsScopeIsNull() {
-        reset(supplier);
-        expect(supplier.get()).andReturn(new RocksDBStore("name", null));
-        expect(supplier.name()).andReturn("name");
-        replay(supplier);
-
-        final Exception e = assertThrows(NullPointerException.class,
-            () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime()));
-        assertThat(e.getMessage(), equalTo("storeSupplier's metricsScope can't be null"));
+        new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime());
     }
 
 }

@@ -24,10 +24,8 @@ import java.util.Map;
 import static java.time.Duration.ofMillis;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-@SuppressWarnings("deprecation")
 public class TimeWindowTest {
 
     private long start = 50;
@@ -35,9 +33,9 @@ public class TimeWindowTest {
     private final TimeWindow window = new TimeWindow(start, end);
     private final SessionWindow sessionWindow = new SessionWindow(start, end);
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void endMustBeLargerThanStart() {
-        assertThrows(IllegalArgumentException.class, () -> new TimeWindow(start, start));
+        new TimeWindow(start, start);
     }
 
     @Test
@@ -120,9 +118,9 @@ public class TimeWindowTest {
         assertFalse(window.overlap(new TimeWindow(125, 150)));
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void cannotCompareTimeWindowWithDifferentWindowType() {
-        assertThrows(IllegalArgumentException.class, () -> window.overlap(sessionWindow));
+        window.overlap(sessionWindow);
     }
 
     @Test
@@ -130,7 +128,7 @@ public class TimeWindowTest {
         final TimeWindows windows = TimeWindows.of(ofMillis(12L)).advanceBy(ofMillis(5L));
         final Map<Long, TimeWindow> matched = windows.windowsFor(21L);
 
-        final Long[] expected = matched.keySet().toArray(new Long[0]);
+        final Long[] expected = matched.keySet().toArray(new Long[matched.size()]);
         assertEquals(expected[0].longValue(), 10L);
         assertEquals(expected[1].longValue(), 15L);
         assertEquals(expected[2].longValue(), 20L);

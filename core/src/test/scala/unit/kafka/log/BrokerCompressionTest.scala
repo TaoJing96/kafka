@@ -17,37 +17,39 @@
 
 package kafka.log
 
-import kafka.message._
-import kafka.server.{BrokerTopicStats, FetchLogEnd, LogDirFailureChannel}
 import kafka.utils._
+import kafka.message._
+import org.junit._
+import org.junit.Assert._
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+import org.junit.runners.Parameterized.Parameters
 import org.apache.kafka.common.record.{CompressionType, MemoryRecords, RecordBatch, SimpleRecord}
 import org.apache.kafka.common.utils.Utils
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api._
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.{Arguments, MethodSource}
+import java.util.{Collection, Properties}
 
-import java.util.Properties
-import scala.jdk.CollectionConverters._
+import kafka.server.{BrokerTopicStats, LogDirFailureChannel}
 
-class BrokerCompressionTest {
+import scala.collection.JavaConverters._
+
+@RunWith(value = classOf[Parameterized])
+class BrokerCompressionTest(messageCompression: String, brokerCompression: String) {
 
   val tmpDir = TestUtils.tempDir()
   val logDir = TestUtils.randomPartitionLogDir(tmpDir)
   val time = new MockTime(0, 0)
   val logConfig = LogConfig()
 
-  @AfterEach
-  def tearDown(): Unit = {
+  @After
+  def tearDown() {
     Utils.delete(tmpDir)
   }
 
   /**
    * Test broker-side compression configuration
    */
-  @ParameterizedTest
-  @MethodSource(Array("parameters"))
-  def testBrokerSideCompression(messageCompression: String, brokerCompression: String): Unit = {
+  @Test
+  def testBrokerSideCompression() {
     val messageCompressionCode = CompressionCodec.getCompressionCodec(messageCompression)
     val logProps = new Properties()
     logProps.put(LogConfig.CompressionTypeProp, brokerCompression)
@@ -55,34 +57,33 @@ class BrokerCompressionTest {
     val log = Log(logDir, LogConfig(logProps), logStartOffset = 0L, recoveryPoint = 0L, scheduler = time.scheduler,
       time = time, brokerTopicStats = new BrokerTopicStats, maxProducerIdExpirationMs = 60 * 60 * 1000,
       producerIdExpirationCheckIntervalMs = LogManager.ProducerIdExpirationCheckIntervalMs,
-      logDirFailureChannel = new LogDirFailureChannel(10), topicId = None, keepPartitionMetadataFile = true)
+      logDirFailureChannel = new LogDirFailureChannel(10))
 
     /* append two messages */
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.forId(messageCompressionCode.codec), 0,
           new SimpleRecord("hello".getBytes), new SimpleRecord("there".getBytes)), leaderEpoch = 0)
 
     def readBatch(offset: Int): RecordBatch = {
-      val fetchInfo = log.read(offset,
-        maxLength = 4096,
-        isolation = FetchLogEnd,
-        minOneMessage = true)
+      val fetchInfo = log.read(offset, 4096, maxOffset = None,
+        includeAbortedTxns = false, minOneMessage = true)
       fetchInfo.records.batches.iterator.next()
     }
 
     if (!brokerCompression.equals("producer")) {
       val brokerCompressionCode = BrokerCompressionCodec.getCompressionCodec(brokerCompression)
-      assertEquals(brokerCompressionCode.codec, readBatch(0).compressionType.id, "Compression at offset 0 should produce " + brokerCompressionCode.name)
+      assertEquals("Compression at offset 0 should produce " + brokerCompressionCode.name, brokerCompressionCode.codec, readBatch(0).compressionType.id)
     }
     else
-      assertEquals(messageCompressionCode.codec, readBatch(0).compressionType.id, "Compression at offset 0 should produce " + messageCompressionCode.name)
+      assertEquals("Compression at offset 0 should produce " + messageCompressionCode.name, messageCompressionCode.codec, readBatch(0).compressionType.id)
   }
 
 }
 
 object BrokerCompressionTest {
-  def parameters: java.util.stream.Stream[Arguments] = {
+  @Parameters
+  def parameters: Collection[Array[String]] = {
     (for (brokerCompression <- BrokerCompressionCodec.brokerCompressionOptions;
          messageCompression <- CompressionType.values
-    ) yield Arguments.of(messageCompression.name, brokerCompression)).asJava.stream()
+    ) yield Array(messageCompression.name, brokerCompression)).asJava
   }
 }

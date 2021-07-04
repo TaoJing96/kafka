@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.processor.internals.testutil;
 
+
 import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -25,14 +26,14 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
-public class LogCaptureAppender extends AppenderSkeleton implements AutoCloseable {
-    private final List<LoggingEvent> events = new LinkedList<>();
+public class LogCaptureAppender extends AppenderSkeleton {
+    private final LinkedList<LoggingEvent> events = new LinkedList<>();
 
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     public static class Event {
-        private final String level;
-        private final String message;
-        private final Optional<String> throwableInfo;
+        private String level;
+        private String message;
+        private Optional<String> throwableInfo;
 
         Event(final String level, final String message, final Optional<String> throwableInfo) {
             this.level = level;
@@ -59,18 +60,8 @@ public class LogCaptureAppender extends AppenderSkeleton implements AutoCloseabl
         return logCaptureAppender;
     }
 
-    public static LogCaptureAppender createAndRegister(final Class<?> clazz) {
-        final LogCaptureAppender logCaptureAppender = new LogCaptureAppender();
-        Logger.getLogger(clazz).addAppender(logCaptureAppender);
-        return logCaptureAppender;
-    }
-
     public static void setClassLoggerToDebug(final Class<?> clazz) {
         Logger.getLogger(clazz).setLevel(Level.DEBUG);
-    }
-
-    public static void setClassLoggerToTrace(final Class<?> clazz) {
-        Logger.getLogger(clazz).setLevel(Level.TRACE);
     }
 
     public static void unregister(final LogCaptureAppender logCaptureAppender) {
@@ -120,7 +111,7 @@ public class LogCaptureAppender extends AppenderSkeleton implements AutoCloseabl
 
     @Override
     public void close() {
-        unregister(this);
+
     }
 
     @Override

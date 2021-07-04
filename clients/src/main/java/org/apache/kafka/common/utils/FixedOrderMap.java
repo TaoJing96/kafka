@@ -50,6 +50,12 @@ public final class FixedOrderMap<K, V> extends LinkedHashMap<K, V> {
         throw new UnsupportedOperationException("Removing from registeredStores is not allowed");
     }
 
+    @Deprecated
+    @Override
+    public void clear() {
+        throw new UnsupportedOperationException("Removing from registeredStores is not allowed");
+    }
+
     @Override
     public FixedOrderMap<K, V> clone() {
         throw new UnsupportedOperationException();

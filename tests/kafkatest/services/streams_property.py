@@ -20,4 +20,7 @@ Define Streams configuration property names here.
 STATE_DIR = "state.dir"
 KAFKA_SERVERS = "bootstrap.servers"
 NUM_THREADS = "num.stream.threads"
-PROCESSING_GUARANTEE = "processing.guarantee"
+
+
+
+

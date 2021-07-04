@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
 
-public class TransformationChain<R extends ConnectRecord<R>> implements AutoCloseable {
+public class TransformationChain<R extends ConnectRecord<R>> {
     private static final Logger log = LoggerFactory.getLogger(TransformationChain.class);
 
     private final List<Transformation<R>> transformations;
@@ -55,7 +55,6 @@ public class TransformationChain<R extends ConnectRecord<R>> implements AutoClos
         return record;
     }
 
-    @Override
     public void close() {
         for (Transformation<R> transformation : transformations) {
             transformation.close();

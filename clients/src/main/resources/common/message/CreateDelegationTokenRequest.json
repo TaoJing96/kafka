@@ -16,13 +16,9 @@
 {
   "apiKey": 38,
   "type": "request",
-  "listeners": ["zkBroker"],
   "name": "CreateDelegationTokenRequest",
   // Version 1 is the same as version 0.
-  //
-  // Version 2 is the first flexible version.
-  "validVersions": "0-2",
-  "flexibleVersions": "2+",
+  "validVersions": "0-1",
   "fields": [
     { "name": "Renewers", "type": "[]CreatableRenewers", "versions": "0+",
       "about": "A list of those who are allowed to renew this token before it expires.", "fields": [

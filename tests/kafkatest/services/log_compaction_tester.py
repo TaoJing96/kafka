@@ -33,13 +33,12 @@ class LogCompactionTester(KafkaPathResolverMixin, BackgroundThreadService):
             "collect_default": True}
     }
 
-    def __init__(self, context, kafka, security_protocol="PLAINTEXT", stop_timeout_sec=30, tls_version=None):
+    def __init__(self, context, kafka, security_protocol="PLAINTEXT", stop_timeout_sec=30):
         super(LogCompactionTester, self).__init__(context, 1)
 
         self.kafka = kafka
         self.security_protocol = security_protocol
-        self.tls_version = tls_version
-        self.security_config = SecurityConfig(self.context, security_protocol, tls_version=tls_version)
+        self.security_config = SecurityConfig(self.context, security_protocol)
         self.stop_timeout_sec = stop_timeout_sec
         self.log_compaction_completed = False
 

@@ -25,15 +25,14 @@ import kafka.admin.ConsumerGroupCommand.{ConsumerGroupCommandOptions, ConsumerGr
 import kafka.integration.KafkaServerTestHarness
 import kafka.server.KafkaConfig
 import kafka.utils.TestUtils
-import org.apache.kafka.clients.admin.AdminClientConfig
 import org.apache.kafka.clients.consumer.{KafkaConsumer, RangeAssignor}
-import org.apache.kafka.common.{PartitionInfo, TopicPartition}
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.StringDeserializer
-import org.junit.jupiter.api.{AfterEach, BeforeEach}
+import org.junit.{After, Before}
 
-import scala.jdk.CollectionConverters._
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.JavaConverters._
 
 class ConsumerGroupCommandTest extends KafkaServerTestHarness {
   import ConsumerGroupCommandTest._
@@ -51,25 +50,31 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
     }
   }
 
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     super.setUp()
     createTopic(topic, 1, 1)
   }
 
-  @AfterEach
+  @After
   override def tearDown(): Unit = {
     consumerGroupService.foreach(_.close())
     consumerGroupExecutors.foreach(_.shutdown())
     super.tearDown()
   }
 
-  def committedOffsets(topic: String = topic, group: String = group): collection.Map[TopicPartition, Long] = {
+  def committedOffsets(topic: String = topic, group: String = group): Map[TopicPartition, Long] = {
     val consumer = createNoAutoCommitConsumer(group)
     try {
-      val partitions: Set[TopicPartition] = consumer.partitionsFor(topic)
-        .asScala.toSet.map {partitionInfo : PartitionInfo => new TopicPartition(partitionInfo.topic, partitionInfo.partition)}
-      consumer.committed(partitions.asJava).asScala.filter(_._2 != null).map { case (k, v) => k -> v.offset }
+      val partitions = consumer.partitionsFor(topic).asScala.toSet
+      partitions.flatMap { partitionInfo =>
+        val tp = new TopicPartition(partitionInfo.topic, partitionInfo.partition)
+        val committed = consumer.committed(tp)
+        if (committed == null)
+          None
+        else
+          Some(tp -> committed.offset)
+      }.toMap
     } finally {
       consumer.close()
     }
@@ -85,7 +90,7 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
 
   def getConsumerGroupService(args: Array[String]): ConsumerGroupService = {
     val opts = new ConsumerGroupCommandOptions(args)
-    val service = new ConsumerGroupService(opts, Map(AdminClientConfig.RETRIES_CONFIG -> Int.MaxValue.toString))
+    val service = new ConsumerGroupService(opts)
     consumerGroupService = service :: consumerGroupService
     service
   }
@@ -94,9 +99,8 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
                                topic: String = topic,
                                group: String = group,
                                strategy: String = classOf[RangeAssignor].getName,
-                               customPropsOpt: Option[Properties] = None,
-                               syncCommit: Boolean = false): ConsumerGroupExecutor = {
-    val executor = new ConsumerGroupExecutor(brokerList, numConsumers, group, topic, strategy, customPropsOpt, syncCommit)
+                               customPropsOpt: Option[Properties] = None): ConsumerGroupExecutor = {
+    val executor = new ConsumerGroupExecutor(brokerList, numConsumers, group, topic, strategy, customPropsOpt)
     addExecutor(executor)
     executor
   }
@@ -117,8 +121,7 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
 
 object ConsumerGroupCommandTest {
 
-  abstract class AbstractConsumerRunnable(broker: String, groupId: String, customPropsOpt: Option[Properties] = None,
-                                          syncCommit: Boolean = false) extends Runnable {
+  abstract class AbstractConsumerRunnable(broker: String, groupId: String, customPropsOpt: Option[Properties] = None) extends Runnable {
     val props = new Properties
     configure(props)
     customPropsOpt.foreach(props.asScala ++= _.asScala)
@@ -133,14 +136,11 @@ object ConsumerGroupCommandTest {
 
     def subscribe(): Unit
 
-    def run(): Unit = {
+    def run() {
       try {
         subscribe()
-        while (true) {
+        while (true)
           consumer.poll(Duration.ofMillis(Long.MaxValue))
-          if (syncCommit)
-            consumer.commitSync()
-        }
       } catch {
         case _: WakeupException => // OK
       } finally {
@@ -148,14 +148,13 @@ object ConsumerGroupCommandTest {
       }
     }
 
-    def shutdown(): Unit = {
+    def shutdown() {
       consumer.wakeup()
     }
   }
 
-  class ConsumerRunnable(broker: String, groupId: String, topic: String, strategy: String,
-                         customPropsOpt: Option[Properties] = None, syncCommit: Boolean = false)
-    extends AbstractConsumerRunnable(broker, groupId, customPropsOpt, syncCommit) {
+  class ConsumerRunnable(broker: String, groupId: String, topic: String, strategy: String, customPropsOpt: Option[Properties] = None)
+    extends AbstractConsumerRunnable(broker, groupId, customPropsOpt) {
 
     override def configure(props: Properties): Unit = {
       super.configure(props)
@@ -179,12 +178,12 @@ object ConsumerGroupCommandTest {
     private val executor: ExecutorService = Executors.newFixedThreadPool(numThreads)
     private val consumers = new ArrayBuffer[AbstractConsumerRunnable]()
 
-    def submit(consumerThread: AbstractConsumerRunnable): Unit = {
+    def submit(consumerThread: AbstractConsumerRunnable) {
       consumers += consumerThread
       executor.submit(consumerThread)
     }
 
-    def shutdown(): Unit = {
+    def shutdown() {
       consumers.foreach(_.shutdown())
       executor.shutdown()
       executor.awaitTermination(5000, TimeUnit.MILLISECONDS)
@@ -192,11 +191,11 @@ object ConsumerGroupCommandTest {
   }
 
   class ConsumerGroupExecutor(broker: String, numConsumers: Int, groupId: String, topic: String, strategy: String,
-                              customPropsOpt: Option[Properties] = None, syncCommit: Boolean = false)
+                              customPropsOpt: Option[Properties] = None)
     extends AbstractConsumerGroupExecutor(numConsumers) {
 
     for (_ <- 1 to numConsumers) {
-      submit(new ConsumerRunnable(broker, groupId, topic, strategy, customPropsOpt, syncCommit))
+      submit(new ConsumerRunnable(broker, groupId, topic, strategy, customPropsOpt))
     }
 
   }

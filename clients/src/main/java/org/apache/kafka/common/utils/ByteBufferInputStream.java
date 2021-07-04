@@ -37,9 +37,6 @@ public final class ByteBufferInputStream extends InputStream {
     }
 
     public int read(byte[] bytes, int off, int len) {
-        if (len == 0) {
-            return 0;
-        }
         if (!buffer.hasRemaining()) {
             return -1;
         }

@@ -21,16 +21,8 @@ import java.util.Properties
 import java.util.Collections
 import scala.collection._
 import kafka.message.{CompressionCodec, NoCompressionCodec}
-import scala.jdk.CollectionConverters._
-import kafka.utils.Implicits._
+import scala.collection.JavaConverters._
 
-object VerifiableProperties {
-  def apply(map: java.util.Map[String, AnyRef]): VerifiableProperties = {
-    val props = new Properties()
-    props ++= map.asScala
-    new VerifiableProperties(props)
-  }
-}
 
 class VerifiableProperties(val props: Properties) extends Logging {
   private val referenceSet = mutable.HashSet[String]()
@@ -222,7 +214,7 @@ class VerifiableProperties(val props: Properties) extends Logging {
     }
   }
 
-  def verify(): Unit = {
+  def verify() {
     info("Verifying properties")
     val propNames = Collections.list(props.propertyNames).asScala.map(_.toString).sorted
     for(key <- propNames) {

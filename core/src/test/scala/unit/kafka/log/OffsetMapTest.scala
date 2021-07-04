@@ -20,13 +20,13 @@ package kafka.log
 import java.nio._
 
 import kafka.utils.Exit
-import org.junit.jupiter.api._
-import org.junit.jupiter.api.Assertions._
+import org.junit._
+import org.junit.Assert._
 
 class OffsetMapTest {
   
   @Test
-  def testBasicValidation(): Unit = {
+  def testBasicValidation() {
     validateMap(10)
     validateMap(100)
     validateMap(1000)
@@ -34,7 +34,7 @@ class OffsetMapTest {
   }
   
   @Test
-  def testClear(): Unit = {
+  def testClear() {
     val map = new SkimpyOffsetMap(4000)
     for(i <- 0 until 10)
       map.put(key(i), i)
@@ -46,7 +46,7 @@ class OffsetMapTest {
   }
   
   @Test
-  def testGetWhenFull(): Unit = {
+  def testGetWhenFull() {
     val map = new SkimpyOffsetMap(4096)
     var i = 37L  //any value would do
     while (map.size < map.slots) {
@@ -71,7 +71,7 @@ class OffsetMapTest {
 }
 
 object OffsetMapTest {
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]) {
     if(args.length != 2) {
       System.err.println("USAGE: java OffsetMapTest size load")
       Exit.exit(1)
@@ -82,7 +82,7 @@ object OffsetMapTest {
     val start = System.nanoTime
     val map = test.validateMap(size, load)
     val ellapsedMs = (System.nanoTime - start) / 1000.0 / 1000.0
-    println(s"${map.size} entries in map of size ${map.slots} in $ellapsedMs ms")
+    println(map.size + " entries in map of size " + map.slots + " in " + ellapsedMs + " ms")
     println("Collision rate: %.1f%%".format(100*map.collisionRate))
   }
 }

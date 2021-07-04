@@ -17,43 +17,35 @@
 package kafka.api
 
 import java.security.AccessController
-import java.util.Properties
-
 import javax.security.auth.callback._
 import javax.security.auth.Subject
 import javax.security.auth.login.AppConfigurationEntry
 
-import scala.collection.Seq
 import kafka.server.KafkaConfig
-import kafka.utils.TestUtils
+import kafka.utils.{TestUtils}
 import kafka.utils.JaasTestUtils._
 import org.apache.kafka.common.config.SaslConfigs
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
-import org.apache.kafka.common.network.Mode
+import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth._
 import org.apache.kafka.common.security.plain.PlainAuthenticateCallback
-import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
+import org.junit.Test
 
 object SaslPlainSslEndToEndAuthorizationTest {
 
   class TestPrincipalBuilder extends KafkaPrincipalBuilder {
 
     override def build(context: AuthenticationContext): KafkaPrincipal = {
-      val saslContext = context.asInstanceOf[SaslAuthenticationContext]
-
-      // Verify that peer principal can be obtained from the SSLSession provided in the context
-      // since we have enabled TLS mutual authentication for the listener
-      val sslPrincipal = saslContext.sslSession.get.getPeerPrincipal.getName
-      assertTrue(sslPrincipal.endsWith(s"CN=${TestUtils.SslCertificateCn}"), s"Unexpected SSL principal $sslPrincipal")
-
-      saslContext.server.getAuthorizationID match {
-        case KafkaPlainAdmin =>
-          new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "admin")
-        case KafkaPlainUser =>
-          new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "user")
-        case _ =>
-          KafkaPrincipal.ANONYMOUS
+      context match {
+        case ctx: SaslAuthenticationContext =>
+          ctx.server.getAuthorizationID match {
+            case KafkaPlainAdmin =>
+              new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "admin")
+            case KafkaPlainUser =>
+              new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "user")
+            case _ =>
+              KafkaPrincipal.ANONYMOUS
+          }
       }
     }
   }
@@ -65,8 +57,8 @@ object SaslPlainSslEndToEndAuthorizationTest {
   }
 
   class TestServerCallbackHandler extends AuthenticateCallbackHandler {
-    def configure(configs: java.util.Map[String, _], saslMechanism: String, jaasConfigEntries: java.util.List[AppConfigurationEntry]): Unit = {}
-    def handle(callbacks: Array[Callback]): Unit = {
+    def configure(configs: java.util.Map[String, _], saslMechanism: String, jaasConfigEntries: java.util.List[AppConfigurationEntry]) {}
+    def handle(callbacks: Array[Callback]) {
       var username: String = null
       for (callback <- callbacks) {
         if (callback.isInstanceOf[NameCallback])
@@ -78,12 +70,12 @@ object SaslPlainSslEndToEndAuthorizationTest {
           throw new UnsupportedCallbackException(callback)
       }
     }
-    def close(): Unit = {}
+    def close() {}
   }
 
   class TestClientCallbackHandler extends AuthenticateCallbackHandler {
-    def configure(configs: java.util.Map[String, _], saslMechanism: String, jaasConfigEntries: java.util.List[AppConfigurationEntry]): Unit = {}
-    def handle(callbacks: Array[Callback]): Unit = {
+    def configure(configs: java.util.Map[String, _], saslMechanism: String, jaasConfigEntries: java.util.List[AppConfigurationEntry]) {}
+    def handle(callbacks: Array[Callback]) {
       val subject = Subject.getSubject(AccessController.getContext())
       val username = subject.getPublicCredentials(classOf[String]).iterator().next()
       for (callback <- callbacks) {
@@ -96,7 +88,7 @@ object SaslPlainSslEndToEndAuthorizationTest {
           throw new UnsupportedCallbackException(callback)
       }
     }
-    def close(): Unit = {}
+    def close() {}
   }
 }
 
@@ -109,10 +101,9 @@ object SaslPlainSslEndToEndAuthorizationTest {
 class SaslPlainSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizationTest {
   import SaslPlainSslEndToEndAuthorizationTest._
 
-  this.serverConfig.setProperty(s"${listenerName.configPrefix}${KafkaConfig.SslClientAuthProp}", "required")
   this.serverConfig.setProperty(BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_CONFIG, classOf[TestPrincipalBuilder].getName)
   this.serverConfig.put(KafkaConfig.SaslClientCallbackHandlerClassProp, classOf[TestClientCallbackHandler].getName)
-  val mechanismPrefix = listenerName.saslMechanismConfigPrefix("PLAIN")
+  val mechanismPrefix = ListenerName.forSecurityProtocol(SecurityProtocol.SASL_SSL).saslMechanismConfigPrefix("PLAIN")
   this.serverConfig.put(s"$mechanismPrefix${KafkaConfig.SaslServerCallbackHandlerClassProp}", classOf[TestServerCallbackHandler].getName)
   this.producerConfig.put(SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS, classOf[TestClientCallbackHandler].getName)
   this.consumerConfig.put(SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS, classOf[TestClientCallbackHandler].getName)
@@ -125,24 +116,17 @@ class SaslPlainSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizationTes
   override protected def kafkaClientSaslMechanism = "PLAIN"
   override protected def kafkaServerSaslMechanisms = List("PLAIN")
 
-  override val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "user")
-  override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "admin")
+  override val clientPrincipal = "user"
+  override val kafkaPrincipal = "admin"
 
   override def jaasSections(kafkaServerSaslMechanisms: Seq[String],
                             kafkaClientSaslMechanism: Option[String],
                             mode: SaslSetupMode,
                             kafkaServerEntryName: String): Seq[JaasSection] = {
-    val brokerLogin = PlainLoginModule(KafkaPlainAdmin, "") // Password provided by callback handler
-    val clientLogin = PlainLoginModule(KafkaPlainUser2, KafkaPlainPassword2)
+    val brokerLogin = new PlainLoginModule(KafkaPlainAdmin, "") // Password provided by callback handler
+    val clientLogin = new PlainLoginModule(KafkaPlainUser2, KafkaPlainPassword2)
     Seq(JaasSection(kafkaServerEntryName, Seq(brokerLogin)),
       JaasSection(KafkaClientContextName, Seq(clientLogin))) ++ zkSections
-  }
-
-  // Generate SSL certificates for clients since we are enabling TLS mutual authentication
-  // in this test for the SASL_SSL listener.
-  override def clientSecurityProps(certAlias: String): Properties = {
-    TestUtils.securityConfigs(Mode.CLIENT, securityProtocol, trustStoreFile, certAlias, TestUtils.SslCertificateCn,
-      clientSaslProperties, needsClientCert = Some(true))
   }
 
   /**
@@ -150,7 +134,7 @@ class SaslPlainSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizationTes
    * have expected ACLs.
    */
   @Test
-  def testAcls(): Unit = {
+  def testAcls() {
     TestUtils.verifySecureZkAcls(zkClient, 1)
   }
 }

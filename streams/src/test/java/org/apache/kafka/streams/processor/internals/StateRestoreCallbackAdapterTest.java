@@ -33,17 +33,16 @@ import static org.apache.kafka.streams.processor.internals.StateRestoreCallbackA
 import static org.easymock.EasyMock.mock;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
-import static org.junit.Assert.assertThrows;
 
 public class StateRestoreCallbackAdapterTest {
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void shouldThrowOnRestoreAll() {
-        assertThrows(UnsupportedOperationException.class, () -> adapt(mock(StateRestoreCallback.class)).restoreAll(null));
+        adapt(mock(StateRestoreCallback.class)).restoreAll(null);
     }
 
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void shouldThrowOnRestore() {
-        assertThrows(UnsupportedOperationException.class, () -> adapt(mock(StateRestoreCallback.class)).restore(null, null));
+        adapt(mock(StateRestoreCallback.class)).restore(null, null);
     }
 
     @Test

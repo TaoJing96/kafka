@@ -64,7 +64,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         delimiter = config.getString(DELIMITER_CONFIG);
-        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
+        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
     }
 
     @Override
@@ -106,7 +106,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
             Object value = entry.getValue();
             if (value == null) {
                 newRecord.put(fieldName(fieldNamePrefix, entry.getKey()), null);
-                continue;
+                return;
             }
 
             Schema.Type inferredType = ConnectSchema.schemaType(value.getClass());

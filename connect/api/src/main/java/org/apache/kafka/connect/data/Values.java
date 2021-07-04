@@ -421,7 +421,7 @@ public class Values {
                     if (value instanceof Number) {
                         // Not already a decimal, so treat it as a double ...
                         double converted = ((Number) value).doubleValue();
-                        return BigDecimal.valueOf(converted);
+                        return new BigDecimal(converted);
                     }
                     if (value instanceof String) {
                         return new BigDecimal(value.toString()).doubleValue();
@@ -891,7 +891,7 @@ public class Values {
         }
 
         String token = parser.next();
-        if (Utils.isBlank(token)) {
+        if (token.trim().isEmpty()) {
             return new SchemaAndValue(Schema.STRING_SCHEMA, token);
         }
         token = token.trim();
@@ -1253,7 +1253,7 @@ public class Values {
                 nextToken = consumeNextToken();
             }
             if (ignoreLeadingAndTrailingWhitespace) {
-                while (Utils.isBlank(nextToken) && canConsumeNextToken()) {
+                while (nextToken.trim().isEmpty() && canConsumeNextToken()) {
                     nextToken = consumeNextToken();
                 }
             }

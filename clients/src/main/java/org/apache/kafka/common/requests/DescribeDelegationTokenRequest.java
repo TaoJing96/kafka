@@ -16,57 +16,106 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.message.DescribeDelegationTokenRequestData;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.ArrayOf;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Schema;
+import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+
+import static org.apache.kafka.common.protocol.CommonFields.PRINCIPAL_NAME;
+import static org.apache.kafka.common.protocol.CommonFields.PRINCIPAL_TYPE;
 
 public class DescribeDelegationTokenRequest extends AbstractRequest {
+    private static final String OWNER_KEY_NAME = "owners";
+
+    private final List<KafkaPrincipal> owners;
+
+    public static final Schema TOKEN_DESCRIBE_REQUEST_V0 = new Schema(
+        new Field(OWNER_KEY_NAME, ArrayOf.nullable(new Schema(PRINCIPAL_TYPE, PRINCIPAL_NAME)), "An array of token owners."));
+
+    /**
+     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
+     */
+    public static final Schema TOKEN_DESCRIBE_REQUEST_V1 = TOKEN_DESCRIBE_REQUEST_V0;
 
     public static class Builder extends AbstractRequest.Builder<DescribeDelegationTokenRequest> {
-        private final DescribeDelegationTokenRequestData data;
+        // describe token for the given list of owners, or null if we want to describe all tokens.
+        private final List<KafkaPrincipal> owners;
 
         public Builder(List<KafkaPrincipal> owners) {
             super(ApiKeys.DESCRIBE_DELEGATION_TOKEN);
-            this.data = new DescribeDelegationTokenRequestData()
-                .setOwners(owners == null ? null : owners
-                    .stream()
-                    .map(owner -> new DescribeDelegationTokenRequestData.DescribeDelegationTokenOwner()
-                            .setPrincipalName(owner.getName())
-                            .setPrincipalType(owner.getPrincipalType()))
-                    .collect(Collectors.toList()));
+            this.owners = owners;
         }
 
         @Override
         public DescribeDelegationTokenRequest build(short version) {
-            return new DescribeDelegationTokenRequest(data, version);
+            return new DescribeDelegationTokenRequest(version, owners);
         }
 
         @Override
         public String toString() {
-            return data.toString();
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type: DescribeDelegationTokenRequest").
+                append(", owners=").append(owners).
+                append(")");
+            return bld.toString();
         }
     }
 
-    private final DescribeDelegationTokenRequestData data;
-
-    public DescribeDelegationTokenRequest(DescribeDelegationTokenRequestData data, short version) {
+    private DescribeDelegationTokenRequest(short version, List<KafkaPrincipal> owners) {
         super(ApiKeys.DESCRIBE_DELEGATION_TOKEN, version);
-        this.data = data;
+        this.owners = owners;
+    }
+
+    public DescribeDelegationTokenRequest(Struct struct, short versionId) {
+        super(ApiKeys.DESCRIBE_DELEGATION_TOKEN, versionId);
+
+        Object[] ownerArray = struct.getArray(OWNER_KEY_NAME);
+
+        if (ownerArray != null) {
+            owners = new ArrayList<>();
+            for (Object ownerObj : ownerArray) {
+                Struct ownerObjStruct = (Struct) ownerObj;
+                String principalType = ownerObjStruct.get(PRINCIPAL_TYPE);
+                String principalName = ownerObjStruct.get(PRINCIPAL_NAME);
+                owners.add(new KafkaPrincipal(principalType, principalName));
+            }
+        } else
+            owners = null;
+    }
+
+    public static Schema[] schemaVersions() {
+        return new Schema[]{TOKEN_DESCRIBE_REQUEST_V0, TOKEN_DESCRIBE_REQUEST_V1};
     }
 
     @Override
-    public DescribeDelegationTokenRequestData data() {
-        return data;
-    }
+    protected Struct toStruct() {
+        short version = version();
+        Struct struct = new Struct(ApiKeys.DESCRIBE_DELEGATION_TOKEN.requestSchema(version));
 
-    public boolean ownersListEmpty() {
-        return data.owners() != null && data.owners().isEmpty();
+        if (owners == null) {
+            struct.set(OWNER_KEY_NAME, null);
+        } else {
+            Object[] ownersArray = new Object[owners.size()];
+
+            int i = 0;
+            for (KafkaPrincipal principal: owners) {
+                Struct ownerStruct = struct.instance(OWNER_KEY_NAME);
+                ownerStruct.set(PRINCIPAL_TYPE, principal.getPrincipalType());
+                ownerStruct.set(PRINCIPAL_NAME, principal.getName());
+                ownersArray[i++] = ownerStruct;
+            }
+
+            struct.set(OWNER_KEY_NAME, ownersArray);
+        }
+
+        return struct;
     }
 
     @Override
@@ -74,8 +123,15 @@ public class DescribeDelegationTokenRequest extends AbstractRequest {
         return new DescribeDelegationTokenResponse(throttleTimeMs, Errors.forException(e));
     }
 
+    public List<KafkaPrincipal> owners() {
+        return owners;
+    }
+
+    public boolean ownersListEmpty() {
+        return owners != null && owners.isEmpty();
+    }
+
     public static DescribeDelegationTokenRequest parse(ByteBuffer buffer, short version) {
-        return new DescribeDelegationTokenRequest(new DescribeDelegationTokenRequestData(
-            new ByteBufferAccessor(buffer), version), version);
+        return new DescribeDelegationTokenRequest(ApiKeys.DESCRIBE_DELEGATION_TOKEN.parseRequest(version, buffer), version);
     }
 }

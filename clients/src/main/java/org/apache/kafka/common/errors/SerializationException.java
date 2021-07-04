@@ -41,4 +41,10 @@ public class SerializationException extends KafkaException {
         super();
     }
 
+    /* avoid the expensive and useless stack trace for serialization exceptions */
+    @Override
+    public Throwable fillInStackTrace() {
+        return this;
+    }
+
 }

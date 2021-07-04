@@ -23,8 +23,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
-import java.util.function.BiConsumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class CollectionUtils {
@@ -65,29 +63,13 @@ public final class CollectionUtils {
      * @return partitions per topic
      */
     public static Map<String, List<Integer>> groupPartitionsByTopic(Collection<TopicPartition> partitions) {
-        return groupPartitionsByTopic(
-            partitions,
-            topic -> new ArrayList<>(),
-            List::add
-        );
-    }
-
-    /**
-     * Group a collection of partitions by topic
-     *
-     * @return The map used to group the partitions
-     */
-    public static <T> Map<String, T> groupPartitionsByTopic(
-        Collection<TopicPartition> partitions,
-        Function<String, T> buildGroup,
-        BiConsumer<T, Integer> addToGroup
-    ) {
-        Map<String, T> dataByTopic = new HashMap<>();
+        Map<String, List<Integer>> partitionsByTopic = new HashMap<>();
         for (TopicPartition tp : partitions) {
             String topic = tp.topic();
-            T topicData = dataByTopic.computeIfAbsent(topic, buildGroup);
-            addToGroup.accept(topicData, tp.partition());
+            List<Integer> topicData = partitionsByTopic.computeIfAbsent(topic, t -> new ArrayList<>());
+            topicData.add(tp.partition());
         }
-        return dataByTopic;
+        return partitionsByTopic;
     }
+
 }

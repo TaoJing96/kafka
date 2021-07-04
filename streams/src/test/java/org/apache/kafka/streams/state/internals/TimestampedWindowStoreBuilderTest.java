@@ -17,12 +17,9 @@
 
 package org.apache.kafka.streams.state.internals;
 
-import java.time.Duration;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.state.StoreBuilder;
-import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
 import org.easymock.EasyMockRunner;
@@ -39,10 +36,7 @@ import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.reset;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 
 @RunWith(EasyMockRunner.class)
 public class TimestampedWindowStoreBuilderTest {
@@ -57,7 +51,6 @@ public class TimestampedWindowStoreBuilderTest {
     public void setUp() {
         expect(supplier.get()).andReturn(inner);
         expect(supplier.name()).andReturn("name");
-        expect(supplier.metricsScope()).andReturn("metricScope");
         expect(inner.persistent()).andReturn(true).anyTimes();
         replay(supplier, inner);
 
@@ -165,60 +158,25 @@ public class TimestampedWindowStoreBuilderTest {
         assertThat(((WrappedStateStore) store).wrapped(), instanceOf(WindowToTimestampedWindowByteStoreAdapter.class));
     }
 
-    @SuppressWarnings("unchecked")
-    @Test
-    public void shouldDisableCachingWithRetainDuplicates() {
-        supplier = Stores.persistentTimestampedWindowStore("name", Duration.ofMillis(10L), Duration.ofMillis(10L), true);
-        final StoreBuilder<TimestampedWindowStore<String, String>> builder = new TimestampedWindowStoreBuilder<>(
-            supplier,
-            Serdes.String(),
-            Serdes.String(),
-            new MockTime()
-        ).withCachingEnabled();
-
-        builder.build();
-
-        assertFalse(((AbstractStoreBuilder<String, String, TimestampedWindowStore<String, String>>) builder).enableCaching);
-    }
-
     @SuppressWarnings("all")
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfInnerIsNull() {
-        assertThrows(NullPointerException.class, () -> new TimestampedWindowStoreBuilder<>(null, Serdes.String(), Serdes.String(), new MockTime()));
+        new TimestampedWindowStoreBuilder<>(null, Serdes.String(), Serdes.String(), new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfKeySerdeIsNull() {
-        assertThrows(NullPointerException.class, () -> new TimestampedWindowStoreBuilder<>(supplier, null, Serdes.String(), new MockTime()));
+        new TimestampedWindowStoreBuilder<>(supplier, null, Serdes.String(), new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfValueSerdeIsNull() {
-        assertThrows(NullPointerException.class, () -> new TimestampedWindowStoreBuilder<>(supplier, Serdes.String(), null, new MockTime()));
+        new TimestampedWindowStoreBuilder<>(supplier, Serdes.String(), null, new MockTime());
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerIfTimeIsNull() {
-        assertThrows(NullPointerException.class, () -> new TimestampedWindowStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null));
-    }
-
-    @Test
-    public void shouldThrowNullPointerIfMetricsScopeIsNull() {
-        reset(supplier);
-        expect(supplier.get()).andReturn(new RocksDBTimestampedWindowStore(
-            new RocksDBTimestampedSegmentedBytesStore(
-                "name",
-                null,
-                10L,
-                5L,
-                new WindowKeySchema()),
-            false,
-            1L));
-        expect(supplier.name()).andReturn("name");
-        replay(supplier);
-        final Exception e = assertThrows(NullPointerException.class,
-            () -> new TimestampedWindowStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime()));
-        assertThat(e.getMessage(), equalTo("storeSupplier's metricsScope can't be null"));
+        new TimestampedWindowStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null);
     }
 
 }

@@ -25,7 +25,7 @@ import kafka.server.epoch.EpochEntry
 import scala.collection._
 
 trait LeaderEpochCheckpoint {
-  def write(epochs: Iterable[EpochEntry]): Unit
+  def write(epochs: Seq[EpochEntry])
   def read(): Seq[EpochEntry]
 }
 
@@ -52,22 +52,14 @@ object LeaderEpochCheckpointFile {
 }
 
 /**
- * This class persists a map of (LeaderEpoch => Offsets) to a file (for a certain replica)
- *
- * The format in the LeaderEpoch checkpoint file is like this:
- * -----checkpoint file begin------
- * 0                <- LeaderEpochCheckpointFile.currentVersion
- * 2                <- following entries size
- * 0  1     <- the format is: leader_epoch(int32) start_offset(int64)
- * 1  2
- * -----checkpoint file end----------
- */
+  * This class persists a map of (LeaderEpoch => Offsets) to a file (for a certain replica)
+  */
 class LeaderEpochCheckpointFile(val file: File, logDirFailureChannel: LogDirFailureChannel = null) extends LeaderEpochCheckpoint {
   import LeaderEpochCheckpointFile._
 
   val checkpoint = new CheckpointFile[EpochEntry](file, CurrentVersion, Formatter, logDirFailureChannel, file.getParentFile.getParent)
 
-  def write(epochs: Iterable[EpochEntry]): Unit = checkpoint.write(epochs)
+  def write(epochs: Seq[EpochEntry]): Unit = checkpoint.write(epochs)
 
   def read(): Seq[EpochEntry] = checkpoint.read()
 }

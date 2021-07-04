@@ -24,7 +24,7 @@ import org.apache.kafka.streams.processor.StreamPartitioner;
 
 import java.util.Map;
 
-public interface RecordCollector {
+public interface RecordCollector extends AutoCloseable {
 
     <K, V> void send(final String topic,
                      final K key,
@@ -45,11 +45,10 @@ public interface RecordCollector {
                      final StreamPartitioner<? super K, ? super V> partitioner);
 
     /**
-     * Initialize the internal {@link Producer}; note this function should be made idempotent
-     *
-     * @throws org.apache.kafka.common.errors.TimeoutException if producer initializing txn id timed out
+     * Initialize the collector with a producer.
+     * @param producer the producer that should be used by this collector
      */
-    void initialize();
+    void init(final Producer<byte[], byte[]> producer);
 
     /**
      * Flush the internal {@link Producer}.
@@ -57,14 +56,9 @@ public interface RecordCollector {
     void flush();
 
     /**
-     * Clean close the internal {@link Producer}.
+     * Close the internal {@link Producer}.
      */
-    void closeClean();
-
-    /**
-     * Dirty close the internal {@link Producer}.
-     */
-    void closeDirty();
+    void close();
 
     /**
      * The last acked offsets from the internal {@link Producer}.
@@ -76,8 +70,6 @@ public interface RecordCollector {
     /**
      * A supplier of a {@link RecordCollectorImpl} instance.
      */
-    // TODO: after we have done KAFKA-9088 we should just add this function
-    // to InternalProcessorContext interface
     interface Supplier {
         /**
          * Get the record collector.

@@ -17,15 +17,13 @@
 package org.apache.kafka.common.security.authenticator;
 
 import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
@@ -37,19 +35,18 @@ import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
 
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.Future;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class ClientAuthenticationFailureTest {
     private static MockTime time = new MockTime(50);
@@ -60,7 +57,7 @@ public class ClientAuthenticationFailureTest {
     private final String topic = "test";
     private TestJaasConfig testJaasConfig;
 
-    @BeforeEach
+    @Before
     public void setup() throws Exception {
         LoginManager.closeAll();
         SecurityProtocol securityProtocol = SecurityProtocol.SASL_PLAINTEXT;
@@ -77,7 +74,7 @@ public class ClientAuthenticationFailureTest {
         server = createEchoServer(securityProtocol);
     }
 
-    @AfterEach
+    @After
     public void teardown() throws Exception {
         if (server != null)
             server.close();
@@ -91,10 +88,13 @@ public class ClientAuthenticationFailureTest {
         StringDeserializer deserializer = new StringDeserializer();
 
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props, deserializer, deserializer)) {
-            assertThrows(SaslAuthenticationException.class, () -> {
-                consumer.subscribe(Collections.singleton(topic));
-                consumer.poll(Duration.ofSeconds(10));
-            });
+            consumer.subscribe(Arrays.asList(topic));
+            consumer.poll(Duration.ofSeconds(10));
+            fail("Expected an authentication error!");
+        } catch (SaslAuthenticationException e) {
+            // OK
+        } catch (Exception e) {
+            throw new AssertionError("Expected only an authentication error, but another error occurred.", e);
         }
     }
 
@@ -106,8 +106,11 @@ public class ClientAuthenticationFailureTest {
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(props, serializer, serializer)) {
             ProducerRecord<String, String> record = new ProducerRecord<>(topic, "message");
-            Future<RecordMetadata> future = producer.send(record);
-            TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
+            producer.send(record).get();
+            fail("Expected an authentication error!");
+        } catch (Exception e) {
+            assertTrue("Expected SaslAuthenticationException, got " + e.getCause().getClass(),
+                    e.getCause() instanceof SaslAuthenticationException);
         }
     }
 
@@ -115,9 +118,13 @@ public class ClientAuthenticationFailureTest {
     public void testAdminClientWithInvalidCredentials() {
         Map<String, Object> props = new HashMap<>(saslClientConfigs);
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + server.port());
-        try (Admin client = Admin.create(props)) {
-            KafkaFuture<Map<String, TopicDescription>> future = client.describeTopics(Collections.singleton("test")).all();
-            TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
+        try (AdminClient client = AdminClient.create(props)) {
+            DescribeTopicsResult result = client.describeTopics(Collections.singleton("test"));
+            result.all().get();
+            fail("Expected an authentication error!");
+        } catch (Exception e) {
+            assertTrue("Expected SaslAuthenticationException, got " + e.getCause().getClass(),
+                    e.getCause() instanceof SaslAuthenticationException);
         }
     }
 
@@ -130,7 +137,10 @@ public class ClientAuthenticationFailureTest {
         StringSerializer serializer = new StringSerializer();
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(props, serializer, serializer)) {
-            assertThrows(SaslAuthenticationException.class, producer::initTransactions);
+            producer.initTransactions();
+            fail("Expected an authentication error!");
+        } catch (SaslAuthenticationException e) {
+            // expected exception
         }
     }
 

@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2018 Joan Goyeau.
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -16,73 +18,69 @@
  */
 package org.apache.kafka.streams.scala.kstream
 
-import org.apache.kafka.streams.kstream.internals.MaterializedInternal
-import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.serialization.Serdes
-import org.apache.kafka.streams.scala.serialization.Serdes._
-import org.apache.kafka.streams.state.Stores
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
-
 import java.time.Duration
 
-class MaterializedTest {
+import org.apache.kafka.streams.kstream.internals.MaterializedInternal
+import org.apache.kafka.streams.scala.Serdes._
+import org.apache.kafka.streams.scala._
+import org.apache.kafka.streams.state.Stores
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{FlatSpec, Matchers}
 
-  @Test
-  def testCreateMaterializedWithSerdes(): Unit = {
+@RunWith(classOf[JUnitRunner])
+class MaterializedTest extends FlatSpec with Matchers {
+
+  "Create a Materialized" should "create a Materialized with Serdes" in {
     val materialized: Materialized[String, Long, ByteArrayKeyValueStore] =
       Materialized.`with`[String, Long, ByteArrayKeyValueStore]
 
     val internalMaterialized = new MaterializedInternal(materialized)
-    assertEquals(Serdes.stringSerde.getClass, internalMaterialized.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalMaterialized.valueSerde.getClass)
+    internalMaterialized.keySerde.getClass shouldBe Serdes.String.getClass
+    internalMaterialized.valueSerde.getClass shouldBe Serdes.Long.getClass
   }
 
-  @Test
-  def testCreateMaterializedWithSerdesAndStoreName(): Unit = {
+  "Create a Materialize with a store name" should "create a Materialized with Serdes and a store name" in {
     val storeName = "store"
     val materialized: Materialized[String, Long, ByteArrayKeyValueStore] =
       Materialized.as[String, Long, ByteArrayKeyValueStore](storeName)
 
     val internalMaterialized = new MaterializedInternal(materialized)
-    assertEquals(Serdes.stringSerde.getClass, internalMaterialized.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalMaterialized.valueSerde.getClass)
-    assertEquals(storeName, internalMaterialized.storeName)
+    internalMaterialized.keySerde.getClass shouldBe Serdes.String.getClass
+    internalMaterialized.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalMaterialized.storeName shouldBe storeName
   }
 
-  @Test
-  def testCreateMaterializedWithSerdesAndWindowStoreSupplier(): Unit = {
+  "Create a Materialize with a window store supplier" should "create a Materialized with Serdes and a store supplier" in {
     val storeSupplier = Stores.persistentWindowStore("store", Duration.ofMillis(1), Duration.ofMillis(1), true)
     val materialized: Materialized[String, Long, ByteArrayWindowStore] =
       Materialized.as[String, Long](storeSupplier)
 
     val internalMaterialized = new MaterializedInternal(materialized)
-    assertEquals(Serdes.stringSerde.getClass, internalMaterialized.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalMaterialized.valueSerde.getClass)
-    assertEquals(storeSupplier, internalMaterialized.storeSupplier)
+    internalMaterialized.keySerde.getClass shouldBe Serdes.String.getClass
+    internalMaterialized.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalMaterialized.storeSupplier shouldBe storeSupplier
   }
 
-  @Test
-  def testCreateMaterializedWithSerdesAndKeyValueStoreSupplier(): Unit = {
+  "Create a Materialize with a key value store supplier" should "create a Materialized with Serdes and a store supplier" in {
     val storeSupplier = Stores.persistentKeyValueStore("store")
     val materialized: Materialized[String, Long, ByteArrayKeyValueStore] =
       Materialized.as[String, Long](storeSupplier)
 
     val internalMaterialized = new MaterializedInternal(materialized)
-    assertEquals(Serdes.stringSerde.getClass, internalMaterialized.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalMaterialized.valueSerde.getClass)
-    assertEquals(storeSupplier, internalMaterialized.storeSupplier)
+    internalMaterialized.keySerde.getClass shouldBe Serdes.String.getClass
+    internalMaterialized.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalMaterialized.storeSupplier shouldBe storeSupplier
   }
 
-  @Test
-  def testCreateMaterializedWithSerdesAndSessionStoreSupplier(): Unit = {
+  "Create a Materialize with a session store supplier" should "create a Materialized with Serdes and a store supplier" in {
     val storeSupplier = Stores.persistentSessionStore("store", Duration.ofMillis(1))
     val materialized: Materialized[String, Long, ByteArraySessionStore] =
       Materialized.as[String, Long](storeSupplier)
 
     val internalMaterialized = new MaterializedInternal(materialized)
-    assertEquals(Serdes.stringSerde.getClass, internalMaterialized.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalMaterialized.valueSerde.getClass)
-    assertEquals(storeSupplier, internalMaterialized.storeSupplier)
+    internalMaterialized.keySerde.getClass shouldBe Serdes.String.getClass
+    internalMaterialized.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalMaterialized.storeSupplier shouldBe storeSupplier
   }
 }

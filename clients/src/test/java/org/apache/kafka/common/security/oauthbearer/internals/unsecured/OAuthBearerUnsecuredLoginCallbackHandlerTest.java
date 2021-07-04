@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -36,7 +35,7 @@ import org.apache.kafka.common.security.authenticator.TestJaasConfig;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
 import org.apache.kafka.common.utils.MockTime;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 public class OAuthBearerUnsecuredLoginCallbackHandlerTest {
 
@@ -52,24 +51,24 @@ public class OAuthBearerUnsecuredLoginCallbackHandlerTest {
         assertEquals("1", callback.extensions().map().get("testId"));
     }
 
-    @Test
-    public void throwsErrorOnInvalidExtensionName() {
+    @Test(expected = IOException.class)
+    public void throwsErrorOnInvalidExtensionName() throws IOException, UnsupportedCallbackException {
         Map<String, String> options = new HashMap<>();
         options.put("unsecuredLoginExtension_test.Id", "1");
         OAuthBearerUnsecuredLoginCallbackHandler callbackHandler = createCallbackHandler(options, new MockTime());
         SaslExtensionsCallback callback = new SaslExtensionsCallback();
 
-        assertThrows(IOException.class, () -> callbackHandler.handle(new Callback[] {callback}));
+        callbackHandler.handle(new Callback[] {callback});
     }
 
-    @Test
-    public void throwsErrorOnInvalidExtensionValue() {
+    @Test(expected = IOException.class)
+    public void throwsErrorOnInvalidExtensionValue() throws IOException, UnsupportedCallbackException {
         Map<String, String> options = new HashMap<>();
         options.put("unsecuredLoginExtension_testId", "Çalifornia");
         OAuthBearerUnsecuredLoginCallbackHandler callbackHandler = createCallbackHandler(options, new MockTime());
         SaslExtensionsCallback callback = new SaslExtensionsCallback();
 
-        assertThrows(IOException.class, () -> callbackHandler.handle(new Callback[] {callback}));
+        callbackHandler.handle(new Callback[] {callback});
     }
 
     @Test
@@ -82,7 +81,7 @@ public class OAuthBearerUnsecuredLoginCallbackHandlerTest {
         OAuthBearerTokenCallback callback = new OAuthBearerTokenCallback();
         callbackHandler.handle(new Callback[] {callback});
         OAuthBearerUnsecuredJws jws = (OAuthBearerUnsecuredJws) callback.token();
-        assertNotNull(jws, "create token failed");
+        assertNotNull("create token failed", jws);
         long startMs = mockTime.milliseconds();
         confirmCorrectValues(jws, user, startMs, 1000 * 60 * 60);
         assertEquals(new HashSet<>(Arrays.asList("sub", "iat", "exp")), jws.claims().keySet());
@@ -118,7 +117,7 @@ public class OAuthBearerUnsecuredLoginCallbackHandlerTest {
             OAuthBearerTokenCallback callback = new OAuthBearerTokenCallback();
             callbackHandler.handle(new Callback[] {callback});
             OAuthBearerUnsecuredJws jws = (OAuthBearerUnsecuredJws) callback.token();
-            assertNotNull(jws, "create token failed");
+            assertNotNull("create token failed", jws);
             long startMs = mockTime.milliseconds();
             confirmCorrectValues(jws, user, startMs, lifetmeSeconds * 1000);
             Map<String, Object> claims = jws.claims();

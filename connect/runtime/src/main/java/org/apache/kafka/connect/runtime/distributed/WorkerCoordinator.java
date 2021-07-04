@@ -18,8 +18,8 @@ package org.apache.kafka.connect.runtime.distributed;
 
 import org.apache.kafka.clients.consumer.internals.AbstractCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerNetworkClient;
-import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.common.metrics.Measurable;
+import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.requests.JoinGroupRequest;
 import org.apache.kafka.common.utils.LogContext;
@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.kafka.common.message.JoinGroupRequestData.JoinGroupRequestProtocolCollection;
 import static org.apache.kafka.common.message.JoinGroupResponseData.JoinGroupResponseMember;
@@ -49,6 +50,9 @@ import static org.apache.kafka.connect.runtime.distributed.ConnectProtocolCompat
  * to workers.
  */
 public class WorkerCoordinator extends AbstractCoordinator implements Closeable {
+    // Currently doesn't support multiple task assignment strategies, so we just fill in a default value
+    public static final String DEFAULT_SUBPROTOCOL = "default";
+
     private final Logger log;
     private final String restUrl;
     private final ConfigBackingStore configStorage;
@@ -68,23 +72,33 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
     /**
      * Initialize the coordination manager.
      */
-    public WorkerCoordinator(GroupRebalanceConfig config,
-                             LogContext logContext,
+    public WorkerCoordinator(LogContext logContext,
                              ConsumerNetworkClient client,
+                             String groupId,
+                             int rebalanceTimeoutMs,
+                             int sessionTimeoutMs,
+                             int heartbeatIntervalMs,
                              Metrics metrics,
                              String metricGrpPrefix,
                              Time time,
+                             long retryBackoffMs,
                              String restUrl,
                              ConfigBackingStore configStorage,
                              WorkerRebalanceListener listener,
                              ConnectProtocolCompatibility protocolCompatibility,
                              int maxDelay) {
-        super(config,
-              logContext,
+        super(logContext,
               client,
+              groupId,
+              Optional.empty(),
+              rebalanceTimeoutMs,
+              sessionTimeoutMs,
+              heartbeatIntervalMs,
               metrics,
               metricGrpPrefix,
-              time);
+              time,
+              retryBackoffMs,
+              true);
         this.log = logContext.logger(WorkerCoordinator.class);
         this.restUrl = restUrl;
         this.configStorage = configStorage;
@@ -96,13 +110,12 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
         this.incrementalAssignor = new IncrementalCooperativeAssignor(logContext, time, maxDelay);
         this.eagerAssignor = new EagerAssignor(logContext);
         this.currentConnectProtocol = protocolCompatibility;
-        this.coordinatorDiscoveryTimeoutMs = config.heartbeatIntervalMs;
+        this.coordinatorDiscoveryTimeoutMs = heartbeatIntervalMs;
         this.lastCompletedGenerationId = Generation.NO_GENERATION.generationId;
     }
 
     @Override
-    public void requestRejoin(final String reason) {
-        log.debug("Request joining group due to: {}", reason);
+    public void requestRejoin() {
         rejoinRequested = true;
     }
 
@@ -172,9 +185,7 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
             case EAGER:
                 return ConnectProtocol.metadataRequest(workerState);
             case COMPATIBLE:
-                return IncrementalCooperativeConnectProtocol.metadataRequest(workerState, false);
-            case SESSIONED:
-                return IncrementalCooperativeConnectProtocol.metadataRequest(workerState, true);
+                return IncrementalCooperativeConnectProtocol.metadataRequest(workerState);
             default:
                 throw new IllegalStateException("Unknown Connect protocol compatibility mode " + protocolCompatibility);
         }
@@ -238,7 +249,6 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
         return super.rejoinNeededOrPending() || (localAssignmentSnapshot == null || localAssignmentSnapshot.failed()) || rejoinRequested;
     }
 
-    @Override
     public String memberId() {
         Generation generation = generationIfStable();
         if (generation != null)
@@ -338,7 +348,7 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
      * @return the current connect protocol version
      */
     public short currentProtocolVersion() {
-        return currentConnectProtocol.protocolVersion();
+        return currentConnectProtocol == EAGER ? (short) 0 : (short) 1;
     }
 
     private class WorkerCoordinatorMetrics {
@@ -347,20 +357,26 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
         public WorkerCoordinatorMetrics(Metrics metrics, String metricGrpPrefix) {
             this.metricGrpName = metricGrpPrefix + "-coordinator-metrics";
 
-            Measurable numConnectors = (config, now) -> {
-                final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
-                if (localAssignmentSnapshot == null) {
-                    return 0.0;
+            Measurable numConnectors = new Measurable() {
+                @Override
+                public double measure(MetricConfig config, long now) {
+                    final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+                    if (localAssignmentSnapshot == null) {
+                        return 0.0;
+                    }
+                    return localAssignmentSnapshot.connectors().size();
                 }
-                return localAssignmentSnapshot.connectors().size();
             };
 
-            Measurable numTasks = (config, now) -> {
-                final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
-                if (localAssignmentSnapshot == null) {
-                    return 0.0;
+            Measurable numTasks = new Measurable() {
+                @Override
+                public double measure(MetricConfig config, long now) {
+                    final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+                    if (localAssignmentSnapshot == null) {
+                        return 0.0;
+                    }
+                    return localAssignmentSnapshot.tasks().size();
                 }
-                return localAssignmentSnapshot.tasks().size();
             };
 
             metrics.addMetric(metrics.metricName("assigned-connectors",

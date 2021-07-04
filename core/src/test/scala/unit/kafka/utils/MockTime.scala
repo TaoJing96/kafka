@@ -32,7 +32,7 @@ class MockTime(currentTimeMs: Long, currentHiResTimeNs: Long) extends JMockTime(
 
   val scheduler = new MockScheduler(this)
 
-  override def sleep(ms: Long): Unit = {
+  override def sleep(ms: Long) {
     super.sleep(ms)
     scheduler.tick()
   }

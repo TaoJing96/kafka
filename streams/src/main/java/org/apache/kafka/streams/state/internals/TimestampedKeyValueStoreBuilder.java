@@ -22,7 +22,6 @@ import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
@@ -47,8 +46,7 @@ public class TimestampedKeyValueStoreBuilder<K, V>
             keySerde,
             valueSerde == null ? null : new ValueAndTimestampSerde<>(valueSerde),
             time);
-        Objects.requireNonNull(storeSupplier, "storeSupplier can't be null");
-        Objects.requireNonNull(storeSupplier.metricsScope(), "storeSupplier's metricsScope can't be null");
+        Objects.requireNonNull(storeSupplier, "bytesStoreSupplier can't be null");
         this.storeSupplier = storeSupplier;
     }
 
@@ -96,15 +94,9 @@ public class TimestampedKeyValueStoreBuilder<K, V>
             this.wrapped = wrapped;
         }
 
-        @Deprecated
         @Override
         public void init(final ProcessorContext context,
                          final StateStore root) {
-            wrapped.init(context, root);
-        }
-
-        @Override
-        public void init(final StateStoreContext context, final StateStore root) {
             wrapped.init(context, root);
         }
 
@@ -142,19 +134,8 @@ public class TimestampedKeyValueStoreBuilder<K, V>
         }
 
         @Override
-        public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from,
-                                                            final Bytes to) {
-            return wrapped.reverseRange(from, to);
-        }
-
-        @Override
         public KeyValueIterator<Bytes, byte[]> all() {
             return wrapped.all();
-        }
-
-        @Override
-        public KeyValueIterator<Bytes, byte[]> reverseAll() {
-            return wrapped.reverseAll();
         }
 
         @Override

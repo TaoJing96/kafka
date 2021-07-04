@@ -27,13 +27,12 @@ import java.util.Properties
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig}
 import kafka.server.KafkaConfig
 import kafka.integration.KafkaServerTestHarness
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig}
+import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig}
 import org.apache.kafka.common.network.{ListenerName, Mode}
 import org.apache.kafka.common.serialization.{ByteArrayDeserializer, ByteArraySerializer, Deserializer, Serializer}
-import org.junit.jupiter.api.{AfterEach, BeforeEach}
+import org.junit.{After, Before}
 
 import scala.collection.mutable
-import scala.collection.Seq
 
 /**
  * A helper class for writing integration tests that involve producers, consumers, and servers
@@ -49,18 +48,18 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
 
   private val consumers = mutable.Buffer[KafkaConsumer[_, _]]()
   private val producers = mutable.Buffer[KafkaProducer[_, _]]()
-  private val adminClients = mutable.Buffer[Admin]()
+  private val adminClients = mutable.Buffer[AdminClient]()
 
   protected def interBrokerListenerName: ListenerName = listenerName
 
   protected def modifyConfigs(props: Seq[Properties]): Unit = {
+    configureListeners(props)
     props.foreach(_ ++= serverConfig)
   }
 
   override def generateConfigs: Seq[KafkaConfig] = {
     val cfgs = TestUtils.createBrokerConfigs(brokerCount, zkConnect, interBrokerSecurityProtocol = Some(securityProtocol),
       trustStoreFile = trustStoreFile, saslProperties = serverSaslProperties, logDirCount = logDirCount)
-    configureListeners(cfgs)
     modifyConfigs(cfgs)
     cfgs.map(KafkaConfig.fromProps)
   }
@@ -79,8 +78,8 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
     }
   }
 
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     doSetup(createOffsetsTopic = true)
   }
 
@@ -138,17 +137,17 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
     consumer
   }
 
-  def createAdminClient(configOverrides: Properties = new Properties): Admin = {
+  def createAdminClient(configOverrides: Properties = new Properties): AdminClient = {
     val props = new Properties
     props ++= adminClientConfig
     props ++= configOverrides
-    val adminClient = Admin.create(props)
+    val adminClient = AdminClient.create(props)
     adminClients += adminClient
     adminClient
   }
 
-  @AfterEach
-  override def tearDown(): Unit = {
+  @After
+  override def tearDown() {
     producers.foreach(_.close(Duration.ZERO))
     consumers.foreach(_.wakeup())
     consumers.foreach(_.close(Duration.ZERO))

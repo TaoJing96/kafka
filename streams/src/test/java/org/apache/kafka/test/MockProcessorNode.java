@@ -17,19 +17,18 @@
 package org.apache.kafka.test;
 
 import org.apache.kafka.streams.processor.PunctuationType;
-import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class MockProcessorNode<KIn, VIn, KOut, VOut> extends ProcessorNode<KIn, VIn, KOut, VOut> {
+public class MockProcessorNode<K, V> extends ProcessorNode<K, V> {
 
     private static final String NAME = "MOCK-PROCESS-";
     private static final AtomicInteger INDEX = new AtomicInteger(1);
 
-    public final MockProcessor<KIn, VIn> mockProcessor;
+    public final MockProcessor<K, V> mockProcessor;
 
     public boolean closed;
     public boolean initialized;
@@ -39,28 +38,28 @@ public class MockProcessorNode<KIn, VIn, KOut, VOut> extends ProcessorNode<KIn, 
     }
 
     public MockProcessorNode(final long scheduleInterval, final PunctuationType punctuationType) {
-        this(new MockProcessor<>(punctuationType, scheduleInterval));
+        this(new MockProcessor<K, V>(punctuationType, scheduleInterval));
     }
 
     public MockProcessorNode() {
-        this(new MockProcessor<>());
+        this(new MockProcessor<K, V>());
     }
 
-    private MockProcessorNode(final MockProcessor<KIn, VIn> mockProcessor) {
+    private MockProcessorNode(final MockProcessor<K, V> mockProcessor) {
         super(NAME + INDEX.getAndIncrement(), mockProcessor, Collections.<String>emptySet());
 
         this.mockProcessor = mockProcessor;
     }
 
     @Override
-    public void init(final InternalProcessorContext<KOut, VOut> context) {
+    public void init(final InternalProcessorContext context) {
         super.init(context);
         initialized = true;
     }
 
     @Override
-    public void process(final Record<KIn, VIn> record) {
-        processor().process(record);
+    public void process(final K key, final V value) {
+        processor().process(key, value);
     }
 
     @Override

@@ -16,7 +16,10 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
-import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.streams.processor.AbstractProcessor;
+import org.apache.kafka.streams.processor.Processor;
+import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -25,10 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
 
-import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensor;
-
-@SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
-public class KTableSource<K, V> implements org.apache.kafka.streams.processor.ProcessorSupplier<K, V> {
+public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
     private static final Logger LOG = LoggerFactory.getLogger(KTableSource.class);
 
     private final String storeName;
@@ -48,7 +48,7 @@ public class KTableSource<K, V> implements org.apache.kafka.streams.processor.Pr
     }
 
     @Override
-    public org.apache.kafka.streams.processor.Processor<K, V> get() {
+    public Processor<K, V> get() {
         return new KTableSourceProcessor();
     }
 
@@ -65,22 +65,17 @@ public class KTableSource<K, V> implements org.apache.kafka.streams.processor.Pr
         this.queryableName = storeName;
     }
 
-    public boolean materialized() {
-        return queryableName != null;
-    }
-
-    private class KTableSourceProcessor extends org.apache.kafka.streams.processor.AbstractProcessor<K, V> {
+    private class KTableSourceProcessor extends AbstractProcessor<K, V> {
 
         private TimestampedKeyValueStore<K, V> store;
         private TimestampedTupleForwarder<K, V> tupleForwarder;
-        private Sensor droppedRecordsSensor;
+        private StreamsMetricsImpl metrics;
 
         @SuppressWarnings("unchecked")
         @Override
-        public void init(final org.apache.kafka.streams.processor.ProcessorContext context) {
+        public void init(final ProcessorContext context) {
             super.init(context);
-            final StreamsMetricsImpl metrics = (StreamsMetricsImpl) context.metrics();
-            droppedRecordsSensor = droppedRecordsSensor(Thread.currentThread().getName(), context.taskId().toString(), metrics);
+            metrics = (StreamsMetricsImpl) context.metrics();
             if (queryableName != null) {
                 store = (TimestampedKeyValueStore<K, V>) context.getStateStore(queryableName);
                 tupleForwarder = new TimestampedTupleForwarder<>(
@@ -99,7 +94,7 @@ public class KTableSource<K, V> implements org.apache.kafka.streams.processor.Pr
                     "Skipping record due to null key. topic=[{}] partition=[{}] offset=[{}]",
                     context().topic(), context().partition(), context().offset()
                 );
-                droppedRecordsSensor.record();
+                metrics.skippedRecordsSensor().record();
                 return;
             }
 

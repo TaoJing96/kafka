@@ -40,6 +40,8 @@ trait TimerTask extends Runnable {
     }
   }
 
-  private[timer] def getTimerTaskEntry: TimerTaskEntry = timerTaskEntry
+  private[timer] def getTimerTaskEntry(): TimerTaskEntry = {
+    timerTaskEntry
+  }
 
 }

@@ -17,7 +17,7 @@
 
 package kafka.log
 
-import org.apache.kafka.common.requests.ListOffsetsResponse
+import org.apache.kafka.common.requests.ListOffsetResponse
 
 sealed trait IndexEntry {
   // We always use Long for both key and value to avoid boxing.
@@ -48,5 +48,5 @@ case class TimestampOffset(timestamp: Long, offset: Long) extends IndexEntry {
 }
 
 object TimestampOffset {
-  val Unknown = TimestampOffset(ListOffsetsResponse.UNKNOWN_TIMESTAMP, ListOffsetsResponse.UNKNOWN_OFFSET)
+  val Unknown = TimestampOffset(ListOffsetResponse.UNKNOWN_TIMESTAMP, ListOffsetResponse.UNKNOWN_OFFSET)
 }

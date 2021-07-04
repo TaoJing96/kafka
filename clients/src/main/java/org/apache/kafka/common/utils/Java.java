@@ -38,7 +38,6 @@ public final class Java {
 
     // Having these as static final provides the best opportunity for compilar optimization
     public static final boolean IS_JAVA9_COMPATIBLE = VERSION.isJava9Compatible();
-    public static final boolean IS_JAVA11_COMPATIBLE = VERSION.isJava11Compatible();
 
     public static boolean isIbmJdk() {
         return System.getProperty("java.vendor").contains("IBM");
@@ -63,10 +62,6 @@ public final class Java {
         // Package private for testing
         boolean isJava9Compatible() {
             return majorVersion >= 9;
-        }
-
-        boolean isJava11Compatible() {
-            return majorVersion >= 11;
         }
 
     }

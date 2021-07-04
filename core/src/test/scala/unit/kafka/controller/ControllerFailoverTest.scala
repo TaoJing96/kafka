@@ -27,8 +27,9 @@ import kafka.utils._
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.log4j.Logger
-import org.junit.jupiter.api.{AfterEach, Test}
-import org.junit.jupiter.api.Assertions._
+import org.junit.{After, Test}
+import org.junit.Assert._
+import org.scalatest.Assertions.fail
 
 class ControllerFailoverTest extends KafkaServerTestHarness with Logging {
   val log = Logger.getLogger(classOf[ControllerFailoverTest])
@@ -43,8 +44,8 @@ class ControllerFailoverTest extends KafkaServerTestHarness with Logging {
   override def generateConfigs = TestUtils.createBrokerConfigs(numNodes, zkConnect)
     .map(KafkaConfig.fromProps(_, overridingProps))
 
-  @AfterEach
-  override def tearDown(): Unit = {
+  @After
+  override def tearDown() {
     super.tearDown()
     this.metrics.close()
   }
@@ -54,9 +55,9 @@ class ControllerFailoverTest extends KafkaServerTestHarness with Logging {
    * for the background of this test case
    */
   @Test
-  def testHandleIllegalStateException(): Unit = {
+  def testHandleIllegalStateException() {
     val initialController = servers.find(_.kafkaController.isActive).map(_.kafkaController).getOrElse {
-      throw new AssertionError("Could not find controller")
+      fail("Could not find controller")
     }
     val initialEpoch = initialController.epoch
     // Create topic with one partition
@@ -77,8 +78,6 @@ class ControllerFailoverTest extends KafkaServerTestHarness with Logging {
         }
         latch.await()
       }
-
-      override def preempt(): Unit = {}
     }
     initialController.eventManager.put(illegalStateEvent)
     // Check that we have shutdown the scheduler (via onControllerResigned)
@@ -86,8 +85,8 @@ class ControllerFailoverTest extends KafkaServerTestHarness with Logging {
     TestUtils.waitUntilTrue(() => !initialController.isActive, "Controller did not become inactive")
     latch.countDown()
     TestUtils.waitUntilTrue(() => Option(exceptionThrown.get()).isDefined, "handleIllegalState did not throw an exception")
-    assertTrue(exceptionThrown.get.isInstanceOf[IllegalStateException],
-      s"handleIllegalState should throw an IllegalStateException, but $exceptionThrown was thrown")
+    assertTrue(s"handleIllegalState should throw an IllegalStateException, but $exceptionThrown was thrown",
+      exceptionThrown.get.isInstanceOf[IllegalStateException])
 
     TestUtils.waitUntilTrue(() => {
       servers.exists { server =>

@@ -22,7 +22,7 @@ import org.apache.kafka.common.record.RecordBatch;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+
 
 /**
  * A class that models the future completion of a produce request for a single partition. There is one of these per
@@ -36,7 +36,7 @@ public class ProduceRequestResult {
 
     private volatile Long baseOffset = null;
     private volatile long logAppendTime = RecordBatch.NO_TIMESTAMP;
-    private volatile Function<Integer, RuntimeException> errorsByIndex;
+    private volatile RuntimeException error;
 
     /**
      * Create an instance of this class.
@@ -52,12 +52,12 @@ public class ProduceRequestResult {
      *
      * @param baseOffset The base offset assigned to the record
      * @param logAppendTime The log append time or -1 if CreateTime is being used
-     * @param errorsByIndex Function mapping the batch index to the exception, or null if the response was successful
+     * @param error The error that occurred if there was one, or null
      */
-    public void set(long baseOffset, long logAppendTime, Function<Integer, RuntimeException> errorsByIndex) {
+    public void set(long baseOffset, long logAppendTime, RuntimeException error) {
         this.baseOffset = baseOffset;
         this.logAppendTime = logAppendTime;
-        this.errorsByIndex = errorsByIndex;
+        this.error = error;
     }
 
     /**
@@ -110,12 +110,8 @@ public class ProduceRequestResult {
     /**
      * The error thrown (generally on the server) while processing this request
      */
-    public RuntimeException error(int batchIndex) {
-        if (errorsByIndex == null) {
-            return null;
-        } else {
-            return errorsByIndex.apply(batchIndex);
-        }
+    public RuntimeException error() {
+        return error;
     }
 
     /**

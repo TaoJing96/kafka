@@ -17,11 +17,20 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Struct;
 
 // Abstract class for all control requests including UpdateMetadataRequest, LeaderAndIsrRequest and StopReplicaRequest
 public abstract class AbstractControlRequest extends AbstractRequest {
-
     public static final long UNKNOWN_BROKER_EPOCH = -1L;
+
+    protected static final Field.Int32 CONTROLLER_ID = new Field.Int32("controller_id", "The controller id");
+    protected static final Field.Int32 CONTROLLER_EPOCH = new Field.Int32("controller_epoch", "The controller epoch");
+    protected static final Field.Int64 BROKER_EPOCH = new Field.Int64("broker_epoch", "The broker epoch");
+
+    protected final int controllerId;
+    protected final int controllerEpoch;
+    protected final long brokerEpoch;
 
     public static abstract class Builder<T extends AbstractRequest> extends AbstractRequest.Builder<T> {
         protected final int controllerId;
@@ -37,14 +46,35 @@ public abstract class AbstractControlRequest extends AbstractRequest {
 
     }
 
-    protected AbstractControlRequest(ApiKeys api, short version) {
-        super(api, version);
+    public int controllerId() {
+        return controllerId;
     }
 
-    public abstract int controllerId();
+    public int controllerEpoch() {
+        return controllerEpoch;
+    }
 
-    public abstract int controllerEpoch();
+    public long brokerEpoch() {
+        return brokerEpoch;
+    }
 
-    public abstract long brokerEpoch();
+    protected AbstractControlRequest(ApiKeys api, short version, int controllerId, int controllerEpoch, long brokerEpoch) {
+        super(api, version);
+        this.controllerId = controllerId;
+        this.controllerEpoch = controllerEpoch;
+        this.brokerEpoch = brokerEpoch;
+    }
+
+    protected AbstractControlRequest(ApiKeys api, Struct struct, short version) {
+        super(api, version);
+        this.controllerId = struct.get(CONTROLLER_ID);
+        this.controllerEpoch = struct.get(CONTROLLER_EPOCH);
+        this.brokerEpoch = struct.getOrElse(BROKER_EPOCH, UNKNOWN_BROKER_EPOCH);
+    }
+
+    // Used for test
+    long size() {
+        return toStruct().sizeOf();
+    }
 
 }

@@ -25,9 +25,7 @@ sudo apt-get install -y \
   ruby-dev \
   zlib1g-dev \
   realpath \
-  python-setuptools \
-  iperf \
-  traceroute
+  python-setuptools
 
 base_dir=`dirname $0`/../..
 

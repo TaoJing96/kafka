@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
+import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.To;
-import org.apache.kafka.streams.processor.api.ProcessorContext;
-import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -26,27 +25,19 @@ import org.apache.kafka.streams.state.internals.CacheFlushListener;
 
 import static org.apache.kafka.streams.state.ValueAndTimestamp.getValueOrNull;
 
-class TimestampedCacheFlushListener<KOut, VOut> implements CacheFlushListener<KOut, ValueAndTimestamp<VOut>> {
-    private final InternalProcessorContext<KOut, Change<VOut>> context;
-
-    @SuppressWarnings("rawtypes")
+class TimestampedCacheFlushListener<K, V> implements CacheFlushListener<K, ValueAndTimestamp<V>> {
+    private final InternalProcessorContext context;
     private final ProcessorNode myNode;
 
-    TimestampedCacheFlushListener(final ProcessorContext<KOut, Change<VOut>> context) {
-        this.context = (InternalProcessorContext<KOut, Change<VOut>>) context;
-        myNode = this.context.currentNode();
-    }
-
-    @SuppressWarnings("unchecked")
-    TimestampedCacheFlushListener(final org.apache.kafka.streams.processor.ProcessorContext context) {
-        this.context = (InternalProcessorContext<KOut, Change<VOut>>) context;
+    TimestampedCacheFlushListener(final ProcessorContext context) {
+        this.context = (InternalProcessorContext) context;
         myNode = this.context.currentNode();
     }
 
     @Override
-    public void apply(final KOut key,
-                      final ValueAndTimestamp<VOut> newValue,
-                      final ValueAndTimestamp<VOut> oldValue,
+    public void apply(final K key,
+                      final ValueAndTimestamp<V> newValue,
+                      final ValueAndTimestamp<V> oldValue,
                       final long timestamp) {
         final ProcessorNode prev = context.currentNode();
         context.setCurrentNode(myNode);
@@ -55,24 +46,6 @@ class TimestampedCacheFlushListener<KOut, VOut> implements CacheFlushListener<KO
                 key,
                 new Change<>(getValueOrNull(newValue), getValueOrNull(oldValue)),
                 To.all().withTimestamp(newValue != null ? newValue.timestamp() : timestamp));
-        } finally {
-            context.setCurrentNode(prev);
-        }
-    }
-
-    @Override
-    public void apply(final Record<KOut, Change<ValueAndTimestamp<VOut>>> record) {
-        @SuppressWarnings("rawtypes") final ProcessorNode prev = context.currentNode();
-        context.setCurrentNode(myNode);
-        try {
-            context.forward(
-                record.withValue(
-                    new Change<>(
-                        getValueOrNull(record.value().newValue),
-                        getValueOrNull(record.value().oldValue)
-                    )
-                )
-            );
         } finally {
             context.setCurrentNode(prev);
         }

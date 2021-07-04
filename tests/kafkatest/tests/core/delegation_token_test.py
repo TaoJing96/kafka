@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ducktape.mark.resource import cluster
 from ducktape.tests.test import Test
 from ducktape.utils.util import wait_until
 from kafkatest.services.kafka import config_property, KafkaService
@@ -37,10 +36,10 @@ class DelegationTokenTest(Test):
         self.zk = ZookeeperService(test_context, num_nodes=1)
         self.kafka = KafkaService(self.test_context, num_nodes=1, zk=self.zk, zk_chroot="/kafka",
                                   topics={self.topic: {"partitions": 1, "replication-factor": 1}},
-                                  server_prop_overrides=[
+                                  server_prop_overides=[
                                       [config_property.DELEGATION_TOKEN_MAX_LIFETIME_MS, "604800000"],
                                       [config_property.DELEGATION_TOKEN_EXPIRY_TIME_MS, "86400000"],
-                                      [config_property.DELEGATION_TOKEN_SECRET_KEY, "test12345"],
+                                      [config_property.DELEGATION_TOKEN_MASTER_KEY, "test12345"],
                                       [config_property.SASL_ENABLED_MECHANISMS, "GSSAPI,SCRAM-SHA-256"]
                                   ])
         self.jaas_deleg_conf_path = "/tmp/jaas_deleg.conf"
@@ -110,7 +109,6 @@ client.id=console-consumer
 
         self.delegation_tokens.renew_delegation_token(dt["hmac"], new_expirydate_ms)
 
-    @cluster(num_nodes=5)
     def test_delegation_token_lifecycle(self):
         self.kafka.start()
         self.delegation_tokens = DelegationTokens(self.kafka, self.test_context)

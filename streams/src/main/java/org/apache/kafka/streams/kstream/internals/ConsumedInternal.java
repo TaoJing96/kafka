@@ -30,14 +30,14 @@ public class ConsumedInternal<K, V> extends Consumed<K, V> {
 
 
     public ConsumedInternal(final Serde<K> keySerde,
-                            final Serde<V> valueSerde,
+                            final Serde<V> valSerde,
                             final TimestampExtractor timestampExtractor,
                             final Topology.AutoOffsetReset offsetReset) {
-        this(Consumed.with(keySerde, valueSerde, timestampExtractor, offsetReset));
+        this(Consumed.with(keySerde, valSerde, timestampExtractor, offsetReset));
     }
 
     public ConsumedInternal() {
-        this(Consumed.with(null, null));
+        this(Consumed.<K, V>with(null, null));
     }
 
     public Serde<K> keySerde() {

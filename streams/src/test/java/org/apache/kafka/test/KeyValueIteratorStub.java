@@ -49,4 +49,8 @@ public class KeyValueIteratorStub<K, V> implements KeyValueIterator<K, V> {
         return iterator.next();
     }
 
+    @Override
+    public void remove() {
+
+    }
 }

@@ -16,27 +16,25 @@
  */
 package org.apache.kafka.clients;
 
+import org.apache.kafka.common.config.ConfigException;
+import org.junit.Test;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
-import org.apache.kafka.common.config.ConfigException;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ClientUtilsTest {
 
     private HostResolver hostResolver = new DefaultHostResolver();
 
     @Test
-    public void testParseAndValidateAddresses() {
+    public void testParseAndValidateAddresses() throws UnknownHostException {
         checkWithoutLookup("127.0.0.1:8000");
         checkWithoutLookup("localhost:8080");
         checkWithoutLookup("[::1]:8000");
@@ -58,28 +56,27 @@ public class ClientUtilsTest {
         // With lookup of example.com, either one or two addresses are expected depending on
         // whether ipv4 and ipv6 are enabled
         List<InetSocketAddress> validatedAddresses = checkWithLookup(Arrays.asList("example.com:10000"));
-        assertTrue(validatedAddresses.size() >= 1, "Unexpected addresses " + validatedAddresses);
+        assertTrue("Unexpected addresses " + validatedAddresses, validatedAddresses.size() >= 1);
         List<String> validatedHostNames = validatedAddresses.stream().map(InetSocketAddress::getHostName)
                 .collect(Collectors.toList());
         List<String> expectedHostNames = Arrays.asList("93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946");
-        assertTrue(expectedHostNames.containsAll(validatedHostNames), "Unexpected addresses " + validatedHostNames);
+        assertTrue("Unexpected addresses " + validatedHostNames, expectedHostNames.containsAll(validatedHostNames));
         validatedAddresses.forEach(address -> assertEquals(10000, address.getPort()));
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testInvalidConfig() {
-        assertThrows(IllegalArgumentException.class,
-            () -> ClientUtils.parseAndValidateAddresses(Collections.singletonList("localhost:10000"), "random.value"));
+        ClientUtils.parseAndValidateAddresses(Arrays.asList("localhost:10000"), "random.value");
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testNoPort() {
-        assertThrows(ConfigException.class, () -> checkWithoutLookup("127.0.0.1"));
+        checkWithoutLookup("127.0.0.1");
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testOnlyBadHostname() {
-        assertThrows(ConfigException.class, () -> checkWithoutLookup("some.invalid.hostname.foo.bar.local:9999"));
+        checkWithoutLookup("some.invalid.hostname.foo.bar.local:9999");
     }
 
     @Test
@@ -100,20 +97,23 @@ public class ClientUtilsTest {
         assertEquals(1, result.size());
     }
 
-    @Test
-    public void testResolveUnknownHostException() {
-        assertThrows(UnknownHostException.class,
-            () -> ClientUtils.resolve("some.invalid.hostname.foo.bar.local", hostResolver));
+    @Test(expected = UnknownHostException.class)
+    public void testResolveUnknownHostException() throws UnknownHostException {
+        ClientUtils.resolve("some.invalid.hostname.foo.bar.local", ClientDnsLookup.DEFAULT, hostResolver);
     }
 
     @Test
     public void testResolveDnsLookup() throws UnknownHostException {
-        // Note that kafka.apache.org resolves to at least 2 IP addresses
-        assertTrue(ClientUtils.resolve("kafka.apache.org", hostResolver).size() > 1);
+        assertEquals(1, ClientUtils.resolve("localhost", ClientDnsLookup.DEFAULT, hostResolver).size());
+    }
+
+    @Test
+    public void testResolveDnsLookupAllIps() throws UnknownHostException {
+        assertTrue(ClientUtils.resolve("kafka.apache.org", ClientDnsLookup.USE_ALL_DNS_IPS, hostResolver).size() > 1);
     }
 
     private List<InetSocketAddress> checkWithoutLookup(String... url) {
-        return ClientUtils.parseAndValidateAddresses(Arrays.asList(url), ClientDnsLookup.USE_ALL_DNS_IPS);
+        return ClientUtils.parseAndValidateAddresses(Arrays.asList(url), ClientDnsLookup.DEFAULT);
     }
 
     private List<InetSocketAddress> checkWithLookup(List<String> url) {

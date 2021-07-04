@@ -16,65 +16,102 @@
  */
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Schema;
+import org.apache.kafka.common.protocol.types.Struct;
+
 import java.nio.ByteBuffer;
 
-import org.apache.kafka.common.message.ExpireDelegationTokenRequestData;
-import org.apache.kafka.common.message.ExpireDelegationTokenResponseData;
-import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
-import org.apache.kafka.common.protocol.Errors;
+import static org.apache.kafka.common.protocol.types.Type.BYTES;
+import static org.apache.kafka.common.protocol.types.Type.INT64;
 
 public class ExpireDelegationTokenRequest extends AbstractRequest {
 
-    private final ExpireDelegationTokenRequestData data;
+    private static final String HMAC_KEY_NAME = "hmac";
+    private static final String EXPIRY_TIME_PERIOD_KEY_NAME = "expiry_time_period";
+    private final ByteBuffer hmac;
+    private final long expiryTimePeriod;
 
-    private ExpireDelegationTokenRequest(ExpireDelegationTokenRequestData data, short version) {
+    private static final Schema TOKEN_EXPIRE_REQUEST_V0 = new Schema(
+        new Field(HMAC_KEY_NAME, BYTES, "HMAC of the delegation token to be expired."),
+        new Field(EXPIRY_TIME_PERIOD_KEY_NAME, INT64, "expiry time period in milli seconds."));
+
+    /**
+     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
+     */
+    private static final Schema TOKEN_EXPIRE_REQUEST_V1 = TOKEN_EXPIRE_REQUEST_V0;
+
+    private ExpireDelegationTokenRequest(short version, ByteBuffer hmac, long renewTimePeriod) {
         super(ApiKeys.EXPIRE_DELEGATION_TOKEN, version);
-        this.data = data;
+
+        this.hmac = hmac;
+        this.expiryTimePeriod = renewTimePeriod;
+    }
+
+    public ExpireDelegationTokenRequest(Struct struct, short versionId) {
+        super(ApiKeys.EXPIRE_DELEGATION_TOKEN, versionId);
+
+        hmac = struct.getBytes(HMAC_KEY_NAME);
+        expiryTimePeriod = struct.getLong(EXPIRY_TIME_PERIOD_KEY_NAME);
     }
 
     public static ExpireDelegationTokenRequest parse(ByteBuffer buffer, short version) {
-        return new ExpireDelegationTokenRequest(
-            new ExpireDelegationTokenRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new ExpireDelegationTokenRequest(ApiKeys.EXPIRE_DELEGATION_TOKEN.parseRequest(version, buffer), version);
+    }
+
+    public static Schema[] schemaVersions() {
+        return new Schema[] {TOKEN_EXPIRE_REQUEST_V0, TOKEN_EXPIRE_REQUEST_V1};
     }
 
     @Override
-    public ExpireDelegationTokenRequestData data() {
-        return data;
+    protected Struct toStruct() {
+        short version = version();
+        Struct struct = new Struct(ApiKeys.EXPIRE_DELEGATION_TOKEN.requestSchema(version));
+
+        struct.set(HMAC_KEY_NAME, hmac);
+        struct.set(EXPIRY_TIME_PERIOD_KEY_NAME, expiryTimePeriod);
+
+        return struct;
     }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        return new ExpireDelegationTokenResponse(
-                new ExpireDelegationTokenResponseData()
-                    .setErrorCode(Errors.forException(e).code())
-                    .setThrottleTimeMs(throttleTimeMs));
+        return new ExpireDelegationTokenResponse(throttleTimeMs, Errors.forException(e));
     }
 
     public ByteBuffer hmac() {
-        return ByteBuffer.wrap(data.hmac());
+        return hmac;
     }
 
     public long expiryTimePeriod() {
-        return data.expiryTimePeriodMs();
+        return expiryTimePeriod;
     }
 
     public static class Builder extends AbstractRequest.Builder<ExpireDelegationTokenRequest> {
-        private final ExpireDelegationTokenRequestData data;
+        private final ByteBuffer hmac;
+        private final long expiryTimePeriod;
 
-        public Builder(ExpireDelegationTokenRequestData data) {
+        public Builder(byte[] hmac, long expiryTimePeriod) {
             super(ApiKeys.EXPIRE_DELEGATION_TOKEN);
-            this.data = data;
+            this.hmac = ByteBuffer.wrap(hmac);
+            this.expiryTimePeriod = expiryTimePeriod;
         }
 
         @Override
         public ExpireDelegationTokenRequest build(short version) {
-            return new ExpireDelegationTokenRequest(data, version);
+            return new ExpireDelegationTokenRequest(version, hmac, expiryTimePeriod);
         }
 
         @Override
         public String toString() {
-            return data.toString();
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type: ExpireDelegationTokenRequest").
+                append(", hmac=").append(hmac).
+                append(", expiryTimePeriod=").append(expiryTimePeriod).
+                append(")");
+            return bld.toString();
         }
     }
 }

@@ -16,20 +16,19 @@
  */
 package org.apache.kafka.common.network;
 
+import java.net.SocketAddress;
 import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.SslAuthenticationException;
 import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
-import org.apache.kafka.common.security.auth.KafkaPrincipalSerde;
 import org.apache.kafka.common.utils.Utils;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.net.SocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.Optional;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
@@ -122,9 +121,8 @@ public class KafkaChannel implements AutoCloseable {
     private long networkThreadTimeNanos;
     private final int maxReceiveSize;
     private final MemoryPool memoryPool;
-    private final ChannelMetadataRegistry metadataRegistry;
     private NetworkReceive receive;
-    private NetworkSend send;
+    private Send send;
     // Track connection and mute state of channels to enable outstanding requests on channels to be
     // processed after the channel is disconnected.
     private boolean disconnected;
@@ -135,8 +133,7 @@ public class KafkaChannel implements AutoCloseable {
     private boolean midWrite;
     private long lastReauthenticationStartNanos;
 
-    public KafkaChannel(String id, TransportLayer transportLayer, Supplier<Authenticator> authenticatorCreator,
-                        int maxReceiveSize, MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) {
+    public KafkaChannel(String id, TransportLayer transportLayer, Supplier<Authenticator> authenticatorCreator, int maxReceiveSize, MemoryPool memoryPool) {
         this.id = id;
         this.transportLayer = transportLayer;
         this.authenticatorCreator = authenticatorCreator;
@@ -144,7 +141,6 @@ public class KafkaChannel implements AutoCloseable {
         this.networkThreadTimeNanos = 0L;
         this.maxReceiveSize = maxReceiveSize;
         this.memoryPool = memoryPool;
-        this.metadataRegistry = metadataRegistry;
         this.disconnected = false;
         this.muteState = ChannelMuteState.NOT_MUTED;
         this.state = ChannelState.NOT_CONNECTED;
@@ -152,7 +148,7 @@ public class KafkaChannel implements AutoCloseable {
 
     public void close() throws IOException {
         this.disconnected = true;
-        Utils.closeAll(transportLayer, authenticator, receive, metadataRegistry);
+        Utils.closeAll(transportLayer, authenticator, receive);
     }
 
     /**
@@ -160,10 +156,6 @@ public class KafkaChannel implements AutoCloseable {
      */
     public KafkaPrincipal principal() {
         return authenticator.principal();
-    }
-
-    public Optional<KafkaPrincipalSerde> principalSerde() {
-        return authenticator.principalSerde();
     }
 
     /**
@@ -336,7 +328,7 @@ public class KafkaChannel implements AutoCloseable {
     /**
      * Returns true if this channel has been explicitly muted using {@link KafkaChannel#mute()}
      */
-    public boolean isMuted() {
+    public boolean isMute() {
         return muteState != ChannelMuteState.NOT_MUTED;
     }
 
@@ -376,58 +368,39 @@ public class KafkaChannel implements AutoCloseable {
         return socket.getInetAddress().toString();
     }
 
-    public void setSend(NetworkSend send) {
+    public void setSend(Send send) {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress, connection id is " + id);
         this.send = send;
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
-    public NetworkSend maybeCompleteSend() {
-        if (send != null && send.completed()) {
-            midWrite = false;
-            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
-            NetworkSend result = send;
-            send = null;
-            return result;
-        }
-        return null;
-    }
+    public NetworkReceive read() throws IOException {
+        NetworkReceive result = null;
 
-    public long read() throws IOException {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id, memoryPool);
         }
 
-        long bytesReceived = receive(this.receive);
-
-        if (this.receive.requiredMemoryAmountKnown() && !this.receive.memoryAllocated() && isInMutableState()) {
+        receive(receive);
+        if (receive.complete()) {
+            receive.payload().rewind();
+            result = receive;
+            receive = null;
+        } else if (receive.requiredMemoryAmountKnown() && !receive.memoryAllocated() && isInMutableState()) {
             //pool must be out of memory, mute ourselves.
             mute();
         }
-        return bytesReceived;
+        return result;
     }
 
-    public NetworkReceive currentReceive() {
-        return receive;
-    }
-
-    public NetworkReceive maybeCompleteReceive() {
-        if (receive != null && receive.complete()) {
-            receive.payload().rewind();
-            NetworkReceive result = receive;
-            receive = null;
-            return result;
+    public Send write() throws IOException {
+        Send result = null;
+        if (send != null && send(send)) {
+            result = send;
+            send = null;
         }
-        return null;
-    }
-
-    public long write() throws IOException {
-        if (send == null)
-            return 0;
-
-        midWrite = true;
-        return send.writeTo(transportLayer);
+        return result;
     }
 
     /**
@@ -448,15 +421,17 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     private long receive(NetworkReceive receive) throws IOException {
-        try {
-            return receive.readFrom(transportLayer);
-        } catch (SslAuthenticationException e) {
-            // With TLSv1.3, post-handshake messages may throw SSLExceptions, which are
-            // handled as authentication failures
-            String remoteDesc = remoteAddress != null ? remoteAddress.toString() : null;
-            state = new ChannelState(ChannelState.State.AUTHENTICATION_FAILED, e, remoteDesc);
-            throw e;
+        return receive.readFrom(transportLayer);
+    }
+
+    private boolean send(Send send) throws IOException {
+        midWrite = true;
+        send.writeTo(transportLayer);
+        if (send.completed()) {
+            midWrite = false;
+            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
         }
+        return send.completed();
     }
 
     /**
@@ -475,12 +450,12 @@ public class KafkaChannel implements AutoCloseable {
             return false;
         }
         KafkaChannel that = (KafkaChannel) o;
-        return id.equals(that.id);
+        return Objects.equals(id, that.id);
     }
 
     @Override
     public int hashCode() {
-        return id.hashCode();
+        return Objects.hash(id);
     }
 
     @Override
@@ -545,7 +520,7 @@ public class KafkaChannel implements AutoCloseable {
          * We've delayed getting the time as long as possible in case we don't need it,
          * but at this point we need it -- so get it now.
          */
-        long nowNanos = nowNanosSupplier.get();
+        long nowNanos = nowNanosSupplier.get().longValue();
         /*
          * Cannot re-authenticate more than once every second; an attempt to do so will
          * result in the SASL handshake network receive being processed normally, which
@@ -635,18 +610,18 @@ public class KafkaChannel implements AutoCloseable {
     
     /**
      * Return the (always non-null but possibly empty) client-side
-     * {@link NetworkReceive} response that arrived during re-authentication but
-     * is unrelated to re-authentication. This corresponds to a request sent
-     * prior to the beginning of re-authentication; the request was made when the
-     * channel was successfully authenticated, and the response arrived during the
+     * {@link NetworkReceive} responses that arrived during re-authentication that
+     * are unrelated to re-authentication, if any. These correspond to requests sent
+     * prior to the beginning of re-authentication; the requests were made when the
+     * channel was successfully authenticated, and the responses arrived during the
      * re-authentication process.
      * 
-     * @return client-side {@link NetworkReceive} response that arrived during
-     *         re-authentication that is unrelated to re-authentication. This may
-     *         be empty.
+     * @return the (always non-null but possibly empty) client-side
+     *         {@link NetworkReceive} responses that arrived during
+     *         re-authentication that are unrelated to re-authentication, if any
      */
-    public Optional<NetworkReceive> pollResponseReceivedDuringReauthentication() {
-        return authenticator.pollResponseReceivedDuringReauthentication();
+    public List<NetworkReceive> getAndClearResponsesReceivedDuringReauthentication() {
+        return authenticator.getAndClearResponsesReceivedDuringReauthentication();
     }
     
     /**
@@ -666,9 +641,5 @@ public class KafkaChannel implements AutoCloseable {
         // replace with a new one and begin the process of re-authenticating
         authenticator = authenticatorCreator.get();
         authenticator.reauthenticate(reauthenticationContext);
-    }
-
-    public ChannelMetadataRegistry channelMetadataRegistry() {
-        return metadataRegistry;
     }
 }

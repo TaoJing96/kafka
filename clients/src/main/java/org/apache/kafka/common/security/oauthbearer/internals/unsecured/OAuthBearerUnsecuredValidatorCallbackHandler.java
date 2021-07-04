@@ -30,7 +30,6 @@ import org.apache.kafka.common.security.oauthbearer.OAuthBearerExtensionsValidat
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallback;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -172,30 +171,40 @@ public class OAuthBearerUnsecuredValidatorCallbackHandler implements Authenticat
         OAuthBearerValidationUtils.validateTimeConsistency(unsecuredJwt).throwExceptionIfFailed();
         OAuthBearerValidationUtils.validateScope(unsecuredJwt, requiredScope).throwExceptionIfFailed();
         log.info("Successfully validated token with principal {}: {}", unsecuredJwt.principalName(),
-                unsecuredJwt.claims());
+                unsecuredJwt.claims().toString());
         callback.token(unsecuredJwt);
     }
 
     private String principalClaimName() {
         String principalClaimNameValue = option(PRINCIPAL_CLAIM_NAME_OPTION);
-        return Utils.isBlank(principalClaimNameValue) ? "sub" : principalClaimNameValue.trim();
+        String principalClaimName = principalClaimNameValue != null && !principalClaimNameValue.trim().isEmpty()
+                ? principalClaimNameValue.trim()
+                : "sub";
+        return principalClaimName;
     }
 
     private String scopeClaimName() {
         String scopeClaimNameValue = option(SCOPE_CLAIM_NAME_OPTION);
-        return Utils.isBlank(scopeClaimNameValue) ? "scope" : scopeClaimNameValue.trim();
+        String scopeClaimName = scopeClaimNameValue != null && !scopeClaimNameValue.trim().isEmpty()
+                ? scopeClaimNameValue.trim()
+                : "scope";
+        return scopeClaimName;
     }
 
     private List<String> requiredScope() {
         String requiredSpaceDelimitedScope = option(REQUIRED_SCOPE_OPTION);
-        return Utils.isBlank(requiredSpaceDelimitedScope) ? Collections.emptyList() : OAuthBearerScopeUtils.parseScope(requiredSpaceDelimitedScope.trim());
+        List<String> requiredScope = requiredSpaceDelimitedScope == null || requiredSpaceDelimitedScope.trim().isEmpty()
+            ? Collections.emptyList()
+            : OAuthBearerScopeUtils.parseScope(requiredSpaceDelimitedScope.trim());
+        return requiredScope;
     }
 
     private int allowableClockSkewMs() {
         String allowableClockSkewMsValue = option(ALLOWABLE_CLOCK_SKEW_MILLIS_OPTION);
         int allowableClockSkewMs = 0;
         try {
-            allowableClockSkewMs = Utils.isBlank(allowableClockSkewMsValue) ? 0 : Integer.parseInt(allowableClockSkewMsValue.trim());
+            allowableClockSkewMs = allowableClockSkewMsValue == null || allowableClockSkewMsValue.trim().isEmpty() ? 0
+                    : Integer.parseInt(allowableClockSkewMsValue.trim());
         } catch (NumberFormatException e) {
             throw new OAuthBearerConfigException(e.getMessage(), e);
         }

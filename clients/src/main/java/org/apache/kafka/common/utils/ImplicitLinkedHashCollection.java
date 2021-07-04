@@ -20,8 +20,6 @@ package org.apache.kafka.common.utils;
 import java.util.AbstractCollection;
 import java.util.AbstractSequentialList;
 import java.util.AbstractSet;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
@@ -48,21 +46,11 @@ import java.util.Set;
  * This set does not allow null elements.  It does not have internal synchronization.
  */
 public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection.Element> extends AbstractCollection<E> {
-    /**
-     * The interface which elements of this collection must implement.  The prev,
-     * setPrev, next, and setNext functions handle manipulating the implicit linked
-     * list which these elements reside in inside the collection.
-     * elementKeysAreEqual() is the function which this collection uses to compare
-     * elements.
-     */
     public interface Element {
         int prev();
         void setPrev(int prev);
         int next();
         void setNext(int next);
-        default boolean elementKeysAreEqual(Object other) {
-            return equals(other);
-        }
     }
 
     /**
@@ -145,81 +133,76 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     }
 
     private class ImplicitLinkedHashCollectionIterator implements ListIterator<E> {
-        private int index = 0;
-        private Element cur;
-        private Element lastReturned;
+        private int cursor = 0;
+        private Element cur = head;
+        private int lastReturnedSlot = INVALID_INDEX;
 
         ImplicitLinkedHashCollectionIterator(int index) {
-            this.cur = indexToElement(head, elements, head.next());
             for (int i = 0; i < index; ++i) {
-                next();
+                cur = indexToElement(head, elements, cur.next());
+                cursor++;
             }
-            this.lastReturned = null;
         }
 
         @Override
         public boolean hasNext() {
-            return cur != head;
+            return cursor != size;
         }
 
         @Override
         public boolean hasPrevious() {
-            return indexToElement(head, elements, cur.prev()) != head;
+            return cursor != 0;
         }
 
         @Override
         public E next() {
-            if (!hasNext()) {
+            if (cursor == size) {
                 throw new NoSuchElementException();
             }
+            lastReturnedSlot = cur.next();
+            cur = indexToElement(head, elements, cur.next());
+            ++cursor;
             @SuppressWarnings("unchecked")
             E returnValue = (E) cur;
-            lastReturned = cur;
-            cur = indexToElement(head, elements, cur.next());
-            ++index;
             return returnValue;
         }
 
         @Override
         public E previous() {
-            Element prev = indexToElement(head, elements, cur.prev());
-            if (prev == head) {
+            if (cursor == 0) {
                 throw new NoSuchElementException();
             }
-            cur = prev;
-            --index;
-            lastReturned = cur;
             @SuppressWarnings("unchecked")
             E returnValue = (E) cur;
+            cur = indexToElement(head, elements, cur.prev());
+            lastReturnedSlot = cur.next();
+            --cursor;
             return returnValue;
         }
 
         @Override
         public int nextIndex() {
-            return index;
+            return cursor;
         }
 
         @Override
         public int previousIndex() {
-            return index - 1;
+            return cursor - 1;
         }
 
         @Override
         public void remove() {
-            if (lastReturned == null) {
+            if (lastReturnedSlot == INVALID_INDEX) {
                 throw new IllegalStateException();
             }
-            Element nextElement = indexToElement(head, elements, lastReturned.next());
-            ImplicitLinkedHashCollection.this.removeElementAtSlot(nextElement.prev());
-            if (lastReturned == cur) {
-                // If the element we are removing was cur, set cur to cur->next.
-                cur = nextElement;
-            } else {
-                // If the element we are removing comes before cur, decrement the index,
-                // since there are now fewer entries before cur.
-                --index;
+
+            if (cur == indexToElement(head, elements, lastReturnedSlot)) {
+                cursor--;
+                cur = indexToElement(head, elements, cur.prev());
             }
-            lastReturned = null;
+            ImplicitLinkedHashCollection.this.removeElementAtSlot(lastReturnedSlot);
+
+            lastReturnedSlot = INVALID_INDEX;
         }
 
         @Override
@@ -330,7 +313,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
             if (element == null) {
                 return INVALID_INDEX;
             }
-            if (element.elementKeysAreEqual(key)) {
+            if (key.equals(element)) {
                 return slot;
             }
             slot = (slot + 1) % elements.length;
@@ -339,7 +322,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     }
 
     /**
-     * An element e in the collection such that e.elementKeysAreEqual(key) and
+     * An element e in the collection such that e.equals(key) and
      * e.hashCode() == key.hashCode().
      *
      * @param key   The element to match.
@@ -365,7 +348,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
 
     /**
      * Returns true if there is at least one element e in the collection such
-     * that key.elementKeysAreEqual(e) and key.hashCode() == e.hashCode().
+     * that key.equals(e) and key.hashCode() == e.hashCode().
      *
      * @param key       The object to try to match.
      */
@@ -378,7 +361,10 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
         // Avoid using even-sized capacities, to get better key distribution.
         int newCapacity = (2 * expectedNumElements) + 1;
         // Don't use a capacity that is too small.
-        return Math.max(newCapacity, MIN_NONEMPTY_CAPACITY);
+        if (newCapacity < MIN_NONEMPTY_CAPACITY) {
+            return MIN_NONEMPTY_CAPACITY;
+        }
+        return newCapacity;
     }
 
     /**
@@ -392,9 +378,6 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     @Override
     final public boolean add(E newElement) {
         if (newElement == null) {
-            return false;
-        }
-        if (newElement.prev() != INVALID_INDEX || newElement.next() != INVALID_INDEX) {
             return false;
         }
         if ((size + 1) >= elements.length / 2) {
@@ -431,7 +414,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
                 addElements[slot] = newElement;
                 return slot;
             }
-            if (element.elementKeysAreEqual(newElement)) {
+            if (element.equals(newElement)) {
                 return INVALID_INDEX;
             }
             slot = (slot + 1) % addElements.length;
@@ -455,7 +438,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     }
 
     /**
-     * Remove the first element e such that key.elementKeysAreEqual(e)
+     * Remove the first element e such that key.equals(e)
      * and key.hashCode == e.hashCode.
      *
      * @param key       The object to try to match.
@@ -569,22 +552,6 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     }
 
     /**
-     * Moves an element which is already in the collection so that it comes last
-     * in iteration order.
-     */
-    final public void moveToEnd(E element) {
-        if (element.prev() == INVALID_INDEX || element.next() == INVALID_INDEX) {
-            throw new RuntimeException("Element " + element + " is not in the collection.");
-        }
-        Element prevElement = indexToElement(head, elements, element.prev());
-        Element nextElement = indexToElement(head, elements, element.next());
-        int slot = prevElement.next();
-        prevElement.setNext(element.next());
-        nextElement.setPrev(element.prev());
-        addToListTail(head, elements, slot);
-    }
-
-    /**
      * Removes all of the elements from this set, and resets the set capacity
      * based on the provided expected number of elements.
      */
@@ -677,19 +644,5 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
      */
     public Set<E> valuesSet() {
         return new ImplicitLinkedHashCollectionSetView();
-    }
-
-    public void sort(Comparator<E> comparator) {
-        ArrayList<E> array = new ArrayList<>(size);
-        Iterator<E> iterator = iterator();
-        while (iterator.hasNext()) {
-            E e = iterator.next();
-            iterator.remove();
-            array.add(e);
-        }
-        array.sort(comparator);
-        for (E e : array) {
-            add(e);
-        }
     }
 }

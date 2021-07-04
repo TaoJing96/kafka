@@ -17,84 +17,75 @@
 
 package org.apache.kafka.clients.admin;
 
-import org.apache.kafka.clients.admin.ConfigEntry.ConfigType;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.Before;
+import org.junit.Test;
 
-import java.util.List;
+import java.util.ArrayList;
+import java.util.Collection;
 
-import static java.util.Arrays.asList;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.hasItems;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.nullValue;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 public class ConfigTest {
     private static final ConfigEntry E1 = new ConfigEntry("a", "b");
     private static final ConfigEntry E2 = new ConfigEntry("c", "d");
     private Config config;
 
-    @BeforeEach
+    @Before
     public void setUp() {
-        config = new Config(asList(E1, E2));
+        final Collection<ConfigEntry> entries = new ArrayList<>();
+        entries.add(E1);
+        entries.add(E2);
+
+        config = new Config(entries);
     }
 
     @Test
     public void shouldGetEntry() {
-        assertEquals(E1, config.get("a"));
-        assertEquals(E2, config.get("c"));
+        assertThat(config.get("a"), is(E1));
+        assertThat(config.get("c"), is(E2));
     }
 
     @Test
     public void shouldReturnNullOnGetUnknownEntry() {
-        assertNull(config.get("unknown"));
+        assertThat(config.get("unknown"), is(nullValue()));
     }
 
     @Test
     public void shouldGetAllEntries() {
-        assertEquals(2, config.entries().size());
-        assertTrue(config.entries().contains(E1));
-        assertTrue(config.entries().contains(E2));
+        assertThat(config.entries().size(), is(2));
+        assertThat(config.entries(), hasItems(E1, E2));
     }
 
     @Test
     public void shouldImplementEqualsProperly() {
-        assertEquals(config, config);
-        assertEquals(config, new Config(config.entries()));
-        assertNotEquals(new Config(asList(E1)), config);
-        assertNotEquals(config, "this");
+        final Collection<ConfigEntry> entries = new ArrayList<>();
+        entries.add(E1);
+
+        assertThat(config, is(equalTo(config)));
+        assertThat(config, is(equalTo(new Config(config.entries()))));
+        assertThat(config, is(not(equalTo(new Config(entries)))));
+        assertThat(config, is(not(equalTo((Object) "this"))));
     }
 
     @Test
     public void shouldImplementHashCodeProperly() {
-        assertEquals(config.hashCode(), config.hashCode());
-        assertEquals(config.hashCode(), new Config(config.entries()).hashCode());
-        assertNotEquals(new Config(asList(E1)).hashCode(), config.hashCode());
+        final Collection<ConfigEntry> entries = new ArrayList<>();
+        entries.add(E1);
+
+        assertThat(config.hashCode(), is(config.hashCode()));
+        assertThat(config.hashCode(), is(new Config(config.entries()).hashCode()));
+        assertThat(config.hashCode(), is(not(new Config(entries).hashCode())));
     }
 
     @Test
     public void shouldImplementToStringProperly() {
-        assertTrue(config.toString().contains(E1.toString()));
-        assertTrue(config.toString().contains(E2.toString()));
-    }
-
-    public static ConfigEntry newConfigEntry(String name, String value, ConfigEntry.ConfigSource source, boolean isSensitive,
-                                             boolean isReadOnly, List<ConfigEntry.ConfigSynonym> synonyms) {
-        return new ConfigEntry(name, value, source, isSensitive, isReadOnly, synonyms, ConfigType.UNKNOWN, null);
-    }
-
-    @Test
-    public void testHashCodeAndEqualsWithNull() {
-        ConfigEntry ce0 = new ConfigEntry("abc", null, null, false, false, null, null, null);
-        ConfigEntry ce1 = new ConfigEntry("abc", null, null, false, false, null, null, null);
-        assertEquals(ce0, ce1);
-        assertEquals(ce0.hashCode(), ce1.hashCode());
-    }
-
-    @Test
-    public void testEquals() {
-        ConfigEntry ce0 = new ConfigEntry("abc", null, ConfigEntry.ConfigSource.DEFAULT_CONFIG, false, false, null, null, null);
-        ConfigEntry ce1 = new ConfigEntry("abc", null, ConfigEntry.ConfigSource.DYNAMIC_BROKER_CONFIG, false, false, null, null, null);
-        assertNotEquals(ce0, ce1);
+        assertThat(config.toString(), containsString(E1.toString()));
+        assertThat(config.toString(), containsString(E2.toString()));
     }
 }

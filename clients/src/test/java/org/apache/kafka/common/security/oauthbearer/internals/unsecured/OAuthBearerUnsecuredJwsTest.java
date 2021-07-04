@@ -16,11 +16,8 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -28,6 +25,8 @@ import java.util.Base64;
 import java.util.Base64.Encoder;
 import java.util.HashSet;
 import java.util.List;
+
+import org.junit.Test;
 
 public class OAuthBearerUnsecuredJwsTest {
     private static final String QUOTE = "\"";
@@ -82,26 +81,24 @@ public class OAuthBearerUnsecuredJwsTest {
         assertEquals("", jws.splits().get(2));
     }
 
-    @Test
+    @Test(expected = OAuthBearerIllegalTokenException.class)
     public void missingPrincipal() {
         String subject = null;
         long issuedAt = 100;
         Long expirationTime = null;
         List<String> scope = Arrays.asList("scopeValue1", "scopeValue2");
         String validCompactSerialization = compactSerialization(subject, issuedAt, expirationTime, scope);
-        assertThrows(OAuthBearerIllegalTokenException.class,
-            () -> new OAuthBearerUnsecuredJws(validCompactSerialization, "sub", "scope"));
+        new OAuthBearerUnsecuredJws(validCompactSerialization, "sub", "scope");
     }
 
-    @Test
+    @Test(expected = OAuthBearerIllegalTokenException.class)
     public void blankPrincipalName() {
         String subject = "   ";
         long issuedAt = 100;
         long expirationTime = issuedAt + 60 * 60;
         List<String> scope = Arrays.asList("scopeValue1", "scopeValue2");
         String validCompactSerialization = compactSerialization(subject, issuedAt, expirationTime, scope);
-        assertThrows(OAuthBearerIllegalTokenException.class,
-            () -> new OAuthBearerUnsecuredJws(validCompactSerialization, "sub", "scope"));
+        new OAuthBearerUnsecuredJws(validCompactSerialization, "sub", "scope");
     }
 
     private static String compactSerialization(String subject, Long issuedAt, Long expirationTime, List<String> scope) {

@@ -17,20 +17,20 @@
 
 package kafka.log
 
+import java.util.{Collections, Locale, Properties}
+
+import scala.collection.JavaConverters._
 import kafka.api.{ApiVersion, ApiVersionValidator}
-import kafka.log.LogConfig.configDef
 import kafka.message.BrokerCompressionCodec
 import kafka.server.{KafkaConfig, ThrottledReplicaListValidator}
 import kafka.utils.Implicits._
-import org.apache.kafka.common.config.ConfigDef.{ConfigKey, ValidList, Validator}
-import org.apache.kafka.common.config.{AbstractConfig, ConfigDef, ConfigException, TopicConfig}
 import org.apache.kafka.common.errors.InvalidConfigurationException
+import org.apache.kafka.common.config.{AbstractConfig, ConfigDef, TopicConfig}
 import org.apache.kafka.common.record.{LegacyRecord, TimestampType}
-import org.apache.kafka.common.utils.{ConfigUtils, Utils}
+import org.apache.kafka.common.utils.Utils
 
-import java.util.{Collections, Locale, Properties}
 import scala.collection.{Map, mutable}
-import scala.jdk.CollectionConverters._
+import org.apache.kafka.common.config.ConfigDef.{ConfigKey, ValidList, Validator}
 
 object Defaults {
   val SegmentSize = kafka.server.Defaults.LogSegmentBytes
@@ -40,9 +40,6 @@ object Defaults {
   val FlushMs = kafka.server.Defaults.LogFlushSchedulerIntervalMs
   val RetentionSize = kafka.server.Defaults.LogRetentionBytes
   val RetentionMs = kafka.server.Defaults.LogRetentionHours * 60 * 60 * 1000L
-  val RemoteLogStorageEnable = false
-  val LocalRetentionBytes = -2 // It indicates the value to be derived from RetentionSize
-  val LocalRetentionMs = -2 // It indicates the value to be derived from RetentionMs
   val MaxMessageSize = kafka.server.Defaults.MessageMaxBytes
   val MaxIndexSize = kafka.server.Defaults.LogIndexSizeMaxBytes
   val IndexInterval = kafka.server.Defaults.LogIndexIntervalBytes
@@ -51,6 +48,11 @@ object Defaults {
   val MinCompactionLagMs = kafka.server.Defaults.LogCleanerMinCompactionLagMs
   val MaxCompactionLagMs = kafka.server.Defaults.LogCleanerMaxCompactionLagMs
   val MinCleanableDirtyRatio = kafka.server.Defaults.LogCleanerMinCleanRatio
+
+  @deprecated(message = "This is a misleading variable name as it actually refers to the 'delete' cleanup policy. Use " +
+                        "`CleanupPolicy` instead.", since = "1.0.0")
+  val Compact = kafka.server.Defaults.LogCleanupPolicy
+
   val CleanupPolicy = kafka.server.Defaults.LogCleanupPolicy
   val UncleanLeaderElectionEnable = kafka.server.Defaults.UncleanLeaderElectionEnable
   val MinInSyncReplicas = kafka.server.Defaults.MinInSyncReplicas
@@ -69,7 +71,7 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
   extends AbstractConfig(LogConfig.configDef, props, false) {
   /**
    * Important note: Any configuration parameter that is passed along from KafkaConfig to LogConfig
-   * should also go in [[LogConfig.extractLogConfigMap()]].
+   * should also go in [[kafka.server.KafkaServer.copyKafkaConfigToLog]].
    */
   val segmentSize = getInt(LogConfig.SegmentBytesProp)
   val segmentMs = getLong(LogConfig.SegmentMsProp)
@@ -98,73 +100,20 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
   val LeaderReplicationThrottledReplicas = getList(LogConfig.LeaderReplicationThrottledReplicasProp)
   val FollowerReplicationThrottledReplicas = getList(LogConfig.FollowerReplicationThrottledReplicasProp)
   val messageDownConversionEnable = getBoolean(LogConfig.MessageDownConversionEnableProp)
-  val remoteStorageEnable = getBoolean(LogConfig.RemoteLogStorageEnableProp)
-
-  val localRetentionMs: Long = {
-    val localLogRetentionMs = getLong(LogConfig.LocalLogRetentionMsProp)
-
-    // -2 indicates to derive value from retentionMs property.
-    if(localLogRetentionMs == -2) retentionMs
-    else {
-      // Added validation here to check the effective value should not be more than RetentionMs.
-      if(localLogRetentionMs == -1 && retentionMs != -1) {
-        throw new ConfigException(LogConfig.LocalLogRetentionMsProp, localLogRetentionMs, s"Value must not be -1 as ${LogConfig.RetentionMsProp} value is set as $retentionMs.")
-      }
-
-      if (localLogRetentionMs > retentionMs) {
-        throw new ConfigException(LogConfig.LocalLogRetentionMsProp, localLogRetentionMs, s"Value must not be more than property: ${LogConfig.RetentionMsProp} value.")
-      }
-
-      localLogRetentionMs
-    }
-  }
-
-  val localRetentionBytes: Long = {
-    val localLogRetentionBytes = getLong(LogConfig.LocalLogRetentionBytesProp)
-
-    // -2 indicates to derive value from retentionSize property.
-    if(localLogRetentionBytes == -2) retentionSize;
-    else {
-      // Added validation here to check the effective value should not be more than RetentionBytes.
-      if(localLogRetentionBytes == -1 && retentionSize != -1) {
-        throw new ConfigException(LogConfig.LocalLogRetentionBytesProp, localLogRetentionBytes, s"Value must not be -1 as ${LogConfig.RetentionBytesProp} value is set as $retentionSize.")
-      }
-
-      if (localLogRetentionBytes > retentionSize) {
-        throw new ConfigException(LogConfig.LocalLogRetentionBytesProp, localLogRetentionBytes, s"Value must not be more than property: ${LogConfig.RetentionBytesProp} value.");
-      }
-
-      localLogRetentionBytes
-    }
-  }
 
   def randomSegmentJitter: Long =
     if (segmentJitterMs == 0) 0 else Utils.abs(scala.util.Random.nextInt()) % math.min(segmentJitterMs, segmentMs)
 
-  def maxSegmentMs: Long = {
+  def maxSegmentMs :Long = {
     if (compact && maxCompactionLagMs > 0) math.min(maxCompactionLagMs, segmentMs)
     else segmentMs
-  }
-
-  def initFileSize: Int = {
-    if (preallocate)
-      segmentSize
-    else
-      0
-  }
-
-  def overriddenConfigsAsLoggableString: String = {
-    val overriddenTopicProps = props.asScala.collect {
-      case (k: String, v) if overriddenConfigs.contains(k) => (k, v.asInstanceOf[AnyRef])
-    }
-    ConfigUtils.configMapToRedactedString(overriddenTopicProps.asJava, configDef)
   }
 }
 
 object LogConfig {
 
-  def main(args: Array[String]): Unit = {
-    println(configDef.toHtml(4, (config: String) => "topicconfigs_" + config))
+  def main(args: Array[String]) {
+    println(configDef.toHtmlTable)
   }
 
   val SegmentBytesProp = TopicConfig.SEGMENT_BYTES_CONFIG
@@ -175,9 +124,6 @@ object LogConfig {
   val FlushMsProp = TopicConfig.FLUSH_MS_CONFIG
   val RetentionBytesProp = TopicConfig.RETENTION_BYTES_CONFIG
   val RetentionMsProp = TopicConfig.RETENTION_MS_CONFIG
-  val RemoteLogStorageEnableProp = TopicConfig.REMOTE_LOG_STORAGE_ENABLE_CONFIG
-  val LocalLogRetentionMsProp = TopicConfig.LOCAL_LOG_RETENTION_MS_CONFIG
-  val LocalLogRetentionBytesProp = TopicConfig.LOCAL_LOG_RETENTION_BYTES_CONFIG
   val MaxMessageBytesProp = TopicConfig.MAX_MESSAGE_BYTES_CONFIG
   val IndexIntervalBytesProp = TopicConfig.INDEX_INTERVAL_BYTES_CONFIG
   val DeleteRetentionMsProp = TopicConfig.DELETE_RETENTION_MS_CONFIG
@@ -209,9 +155,6 @@ object LogConfig {
   val FlushMsDoc = TopicConfig.FLUSH_MS_DOC
   val RetentionSizeDoc = TopicConfig.RETENTION_BYTES_DOC
   val RetentionMsDoc = TopicConfig.RETENTION_MS_DOC
-  val RemoteLogStorageEnableDoc = TopicConfig.REMOTE_LOG_STORAGE_ENABLE_DOC
-  val LocalLogRetentionMsDoc = TopicConfig.LOCAL_LOG_RETENTION_MS_DOC
-  val LocalLogRetentionBytesDoc = TopicConfig.LOCAL_LOG_RETENTION_BYTES_DOC
   val MaxMessageSizeDoc = TopicConfig.MAX_MESSAGE_BYTES_DOC
   val IndexIntervalDoc = TopicConfig.INDEX_INTERVAL_BYTES_DOCS
   val FileDeleteDelayMsDoc = TopicConfig.FILE_DELETE_DELAY_MS_DOC
@@ -238,19 +181,9 @@ object LogConfig {
     "[PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the wildcard '*' can be used to throttle " +
     "all replicas for this topic."
 
-  private[log] val ServerDefaultHeaderName = "Server Default Property"
-
-  val configsWithNoServerDefaults: Set[String] = Set(RemoteLogStorageEnableProp, LocalLogRetentionMsProp, LocalLogRetentionBytesProp);
-
-  // Package private for testing
-  private[log] class LogConfigDef(base: ConfigDef) extends ConfigDef(base) {
-    def this() = this(new ConfigDef)
+  private class LogConfigDef extends ConfigDef {
 
     private final val serverDefaultConfigNames = mutable.Map[String, String]()
-    base match {
-      case b: LogConfigDef => serverDefaultConfigNames ++= b.serverDefaultConfigNames
-      case _ =>
-    }
 
     def define(name: String, defType: ConfigDef.Type, defaultValue: Any, validator: Validator,
                importance: ConfigDef.Importance, doc: String, serverDefaultConfigName: String): LogConfigDef = {
@@ -273,12 +206,11 @@ object LogConfig {
       this
     }
 
-    override def headers = List("Name", "Description", "Type", "Default", "Valid Values", ServerDefaultHeaderName,
-      "Importance").asJava
+    override def headers = List("Name", "Description", "Type", "Default", "Valid Values", "Server Default Property", "Importance").asJava
 
     override def getConfigValue(key: ConfigKey, headerName: String): String = {
       headerName match {
-        case ServerDefaultHeaderName => serverDefaultConfigNames.getOrElse(key.name, null)
+        case "Server Default Property" => serverDefaultConfigNames.get(key.name).get
         case _ => super.getConfigValue(key, headerName)
       }
     }
@@ -286,16 +218,13 @@ object LogConfig {
     def serverConfigName(configName: String): Option[String] = serverDefaultConfigNames.get(configName)
   }
 
-  // Package private for testing, return a copy since it's a mutable global variable
-  private[kafka] def configDefCopy: LogConfigDef = new LogConfigDef(configDef)
-
   private val configDef: LogConfigDef = {
     import org.apache.kafka.common.config.ConfigDef.Importance._
     import org.apache.kafka.common.config.ConfigDef.Range._
     import org.apache.kafka.common.config.ConfigDef.Type._
     import org.apache.kafka.common.config.ConfigDef.ValidString._
 
-    val logConfigDef = new LogConfigDef()
+    new LogConfigDef()
       .define(SegmentBytesProp, INT, Defaults.SegmentSize, atLeast(LegacyRecord.RECORD_OVERHEAD_V0), MEDIUM,
         SegmentSizeDoc, KafkaConfig.LogSegmentBytesProp)
       .define(SegmentMsProp, LONG, Defaults.SegmentMs, atLeast(1), MEDIUM, SegmentMsDoc,
@@ -350,16 +279,6 @@ object LogConfig {
         FollowerReplicationThrottledReplicasDoc, FollowerReplicationThrottledReplicasProp)
       .define(MessageDownConversionEnableProp, BOOLEAN, Defaults.MessageDownConversionEnable, LOW,
         MessageDownConversionEnableDoc, KafkaConfig.LogMessageDownConversionEnableProp)
-
-    // RemoteLogStorageEnableProp, LocalLogRetentionMsProp, LocalLogRetentionBytesProp do not have server default
-    // config names.
-    logConfigDef
-      // This define method is not overridden in LogConfig as these configs do not have server defaults yet.
-      .define(RemoteLogStorageEnableProp, BOOLEAN, Defaults.RemoteLogStorageEnable, MEDIUM, RemoteLogStorageEnableDoc)
-      .define(LocalLogRetentionMsProp, LONG, Defaults.LocalRetentionMs, atLeast(-2), MEDIUM, LocalLogRetentionMsDoc)
-      .define(LocalLogRetentionBytesProp, LONG, Defaults.LocalRetentionBytes, atLeast(-2), MEDIUM, LocalLogRetentionBytesDoc)
-
-    logConfigDef
   }
 
   def apply(): LogConfig = LogConfig(new Properties())
@@ -368,16 +287,12 @@ object LogConfig {
 
   def serverConfigName(configName: String): Option[String] = configDef.serverConfigName(configName)
 
-  def configType(configName: String): Option[ConfigDef.Type] = {
-    Option(configDef.configKeys.get(configName)).map(_.`type`)
-  }
-
   /**
    * Create a log config instance using the given properties and defaults
    */
   def fromProps(defaults: java.util.Map[_ <: Object, _ <: Object], overrides: Properties): LogConfig = {
     val props = new Properties()
-    defaults.forEach { (k, v) => props.put(k, v) }
+    defaults.asScala.foreach { case (k, v) => props.put(k, v) }
     props ++= overrides
     val overriddenKeys = overrides.keySet.asScala.map(_.asInstanceOf[String]).toSet
     new LogConfig(props, overriddenKeys)
@@ -386,7 +301,7 @@ object LogConfig {
   /**
    * Check that property names are valid
    */
-  def validateNames(props: Properties): Unit = {
+  def validateNames(props: Properties) {
     val names = configNames
     for(name <- props.asScala.keys)
       if (!names.contains(name))
@@ -407,7 +322,7 @@ object LogConfig {
   /**
    * Check that the given properties contain only valid log config names and that all values can be parsed and are valid
    */
-  def validate(props: Properties): Unit = {
+  def validate(props: Properties) {
     validateNames(props)
     val valueMaps = configDef.parse(props)
     validateValues(valueMaps)
@@ -444,39 +359,4 @@ object LogConfig {
     MessageDownConversionEnableProp -> KafkaConfig.LogMessageDownConversionEnableProp
   )
 
-
-  /**
-   * Copy the subset of properties that are relevant to Logs. The individual properties
-   * are listed here since the names are slightly different in each Config class...
-   */
-  def extractLogConfigMap(
-    kafkaConfig: KafkaConfig
-  ): java.util.Map[String, Object] = {
-    val logProps = new java.util.HashMap[String, Object]()
-    logProps.put(SegmentBytesProp, kafkaConfig.logSegmentBytes)
-    logProps.put(SegmentMsProp, kafkaConfig.logRollTimeMillis)
-    logProps.put(SegmentJitterMsProp, kafkaConfig.logRollTimeJitterMillis)
-    logProps.put(SegmentIndexBytesProp, kafkaConfig.logIndexSizeMaxBytes)
-    logProps.put(FlushMessagesProp, kafkaConfig.logFlushIntervalMessages)
-    logProps.put(FlushMsProp, kafkaConfig.logFlushIntervalMs)
-    logProps.put(RetentionBytesProp, kafkaConfig.logRetentionBytes)
-    logProps.put(RetentionMsProp, kafkaConfig.logRetentionTimeMillis: java.lang.Long)
-    logProps.put(MaxMessageBytesProp, kafkaConfig.messageMaxBytes)
-    logProps.put(IndexIntervalBytesProp, kafkaConfig.logIndexIntervalBytes)
-    logProps.put(DeleteRetentionMsProp, kafkaConfig.logCleanerDeleteRetentionMs)
-    logProps.put(MinCompactionLagMsProp, kafkaConfig.logCleanerMinCompactionLagMs)
-    logProps.put(MaxCompactionLagMsProp, kafkaConfig.logCleanerMaxCompactionLagMs)
-    logProps.put(FileDeleteDelayMsProp, kafkaConfig.logDeleteDelayMs)
-    logProps.put(MinCleanableDirtyRatioProp, kafkaConfig.logCleanerMinCleanRatio)
-    logProps.put(CleanupPolicyProp, kafkaConfig.logCleanupPolicy)
-    logProps.put(MinInSyncReplicasProp, kafkaConfig.minInSyncReplicas)
-    logProps.put(CompressionTypeProp, kafkaConfig.compressionType)
-    logProps.put(UncleanLeaderElectionEnableProp, kafkaConfig.uncleanLeaderElectionEnable)
-    logProps.put(PreAllocateEnableProp, kafkaConfig.logPreAllocateEnable)
-    logProps.put(MessageFormatVersionProp, kafkaConfig.logMessageFormatVersion.version)
-    logProps.put(MessageTimestampTypeProp, kafkaConfig.logMessageTimestampType.name)
-    logProps.put(MessageTimestampDifferenceMaxMsProp, kafkaConfig.logMessageTimestampDifferenceMaxMs: java.lang.Long)
-    logProps.put(MessageDownConversionEnableProp, kafkaConfig.logMessageDownConversionEnable: java.lang.Boolean)
-    logProps
-  }
 }

@@ -39,10 +39,10 @@ import org.apache.kafka.common.record.RecordBatch
  *
  * The timestamps in the same time index file are guaranteed to be monotonically increasing.
  *
- * The index supports timestamp lookup for a memory map of this file. The lookup is done using a binary search to find
+ * The index support timestamp lookup for a memory map of this file. The lookup is done using a binary search to find
  * the offset of the message whose indexed timestamp is closest but smaller or equals to the target timestamp.
  *
- * Time index files can be opened in two ways: either as an empty, mutable index that allows appending or
+ * Time index files can be opened in two ways: either as an empty, mutable index that allows appends or
  * an immutable read-only index file that has previously been populated. The makeReadOnly method will turn a mutable file into an
  * immutable one and truncate off any extra bytes. This is done when the index file is rolled over.
  *
@@ -102,7 +102,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
 
   /**
    * Attempt to append a time index entry to the time index.
-   * The new entry is appended only if both the timestamp and offset are greater than the last appended timestamp and
+   * The new entry is appended only if both the timestamp and offsets are greater than the last appended timestamp and
    * the last appended offset.
    *
    * @param timestamp The timestamp of the new time index entry
@@ -110,7 +110,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
    * @param skipFullCheck To skip checking whether the segment is full or not. We only skip the check when the segment
    *                      gets rolled or the segment is closed.
    */
-  def maybeAppend(timestamp: Long, offset: Long, skipFullCheck: Boolean = false): Unit = {
+  def maybeAppend(timestamp: Long, offset: Long, skipFullCheck: Boolean = false) {
     inLock(lock) {
       if (!skipFullCheck)
         require(!isFull, "Attempt to append to a full time index (size = " + _entries + ").")
@@ -135,7 +135,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
         mmap.putInt(relativeOffset(offset))
         _entries += 1
         _lastEntry = TimestampOffset(timestamp, offset)
-        require(_entries * entrySize == mmap.position(), s"${_entries} entries but file position in index is ${mmap.position()}.")
+        require(_entries * entrySize == mmap.position(), _entries + " entries but file position in index is " + mmap.position() + ".")
       }
     }
   }
@@ -165,7 +165,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
    * Remove all entries from the index which have an offset greater than or equal to the given offset.
    * Truncating to an offset larger than the largest in the index has no effect.
    */
-  override def truncateTo(offset: Long): Unit = {
+  override def truncateTo(offset: Long) {
     inLock(lock) {
       val idx = mmap.duplicate
       val slot = largestLowerBoundSlotFor(idx, offset, IndexSearchType.VALUE)
@@ -199,7 +199,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
   /**
    * Truncates index to a known number of entries.
    */
-  private def truncateToEntries(entries: Int): Unit = {
+  private def truncateToEntries(entries: Int) {
     inLock(lock) {
       _entries = entries
       mmap.position(_entries * entrySize)
@@ -208,7 +208,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
     }
   }
 
-  override def sanityCheck(): Unit = {
+  override def sanityCheck() {
     val lastTimestamp = lastEntry.timestamp
     val lastOffset = lastEntry.offset
     if (_entries != 0 && lastTimestamp < timestamp(mmap, 0))
@@ -227,3 +227,4 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
 object TimeIndex extends Logging {
   override val loggerName: String = classOf[TimeIndex].getName
 }
+

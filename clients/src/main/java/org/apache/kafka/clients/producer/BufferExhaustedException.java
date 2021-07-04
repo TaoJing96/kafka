@@ -16,17 +16,13 @@
  */
 package org.apache.kafka.clients.producer;
 
-import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.KafkaException;
 
 /**
- * This exception is thrown if the producer cannot allocate memory for a record within max.block.ms due to the buffer
- * being too full.
- *
- * In earlier versions a TimeoutException was thrown instead of this. To keep existing catch-clauses working
- * this class extends TimeoutException.
- *
+ * This exception is thrown if the producer is in non-blocking mode and the rate of data production exceeds the rate at
+ * which data can be sent for long enough for the allocated buffer to be exhausted.
  */
-public class BufferExhaustedException extends TimeoutException {
+public class BufferExhaustedException extends KafkaException {
 
     private static final long serialVersionUID = 1L;
 

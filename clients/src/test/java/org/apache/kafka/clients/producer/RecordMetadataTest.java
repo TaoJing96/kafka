@@ -17,74 +17,65 @@
 package org.apache.kafka.clients.producer;
 
 import org.apache.kafka.common.TopicPartition;
-import org.junit.jupiter.api.Test;
+import org.apache.kafka.common.record.DefaultRecord;
+import org.junit.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class RecordMetadataTest {
 
     @Test
-    public void testConstructionWithMissingBatchIndex() {
+    @SuppressWarnings("deprecation")
+    public void testConstructionWithMissingRelativeOffset() {
         TopicPartition tp = new TopicPartition("foo", 0);
         long timestamp = 2340234L;
         int keySize = 3;
         int valueSize = 5;
+        Long checksum = 908923L;
 
-        RecordMetadata metadata = new RecordMetadata(tp, -1L, -1, timestamp, keySize, valueSize);
+        RecordMetadata metadata = new RecordMetadata(tp, -1L, -1L, timestamp, checksum, keySize, valueSize);
         assertEquals(tp.topic(), metadata.topic());
         assertEquals(tp.partition(), metadata.partition());
         assertEquals(timestamp, metadata.timestamp());
         assertFalse(metadata.hasOffset());
         assertEquals(-1L, metadata.offset());
+        assertEquals(checksum.longValue(), metadata.checksum());
         assertEquals(keySize, metadata.serializedKeySize());
         assertEquals(valueSize, metadata.serializedValueSize());
     }
 
     @Test
-    public void testConstructionWithBatchIndexOffset() {
+    @SuppressWarnings("deprecation")
+    public void testConstructionWithRelativeOffset() {
         TopicPartition tp = new TopicPartition("foo", 0);
         long timestamp = 2340234L;
         int keySize = 3;
         int valueSize = 5;
         long baseOffset = 15L;
-        int batchIndex = 3;
+        long relativeOffset = 3L;
+        Long checksum = 908923L;
 
-        RecordMetadata metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, keySize, valueSize);
+        RecordMetadata metadata = new RecordMetadata(tp, baseOffset, relativeOffset, timestamp, checksum,
+                keySize, valueSize);
         assertEquals(tp.topic(), metadata.topic());
         assertEquals(tp.partition(), metadata.partition());
         assertEquals(timestamp, metadata.timestamp());
-        assertEquals(baseOffset + batchIndex, metadata.offset());
+        assertEquals(baseOffset + relativeOffset, metadata.offset());
+        assertEquals(checksum.longValue(), metadata.checksum());
         assertEquals(keySize, metadata.serializedKeySize());
         assertEquals(valueSize, metadata.serializedValueSize());
     }
 
     @Test
-    @Deprecated
-    public void testConstructionWithChecksum() {
-        TopicPartition tp = new TopicPartition("foo", 0);
+    @SuppressWarnings("deprecation")
+    public void testNullChecksum() {
         long timestamp = 2340234L;
-        long baseOffset = 15L;
-        long batchIndex = 3L;
         int keySize = 3;
         int valueSize = 5;
-
-        RecordMetadata metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, null, keySize, valueSize);
-        assertEquals(tp.topic(), metadata.topic());
-        assertEquals(tp.partition(), metadata.partition());
-        assertEquals(timestamp, metadata.timestamp());
-        assertEquals(baseOffset + batchIndex, metadata.offset());
-        assertEquals(keySize, metadata.serializedKeySize());
-        assertEquals(valueSize, metadata.serializedValueSize());
-
-        long checksum = 133424L;
-        metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, checksum, keySize, valueSize);
-        assertEquals(tp.topic(), metadata.topic());
-        assertEquals(tp.partition(), metadata.partition());
-        assertEquals(timestamp, metadata.timestamp());
-        assertEquals(baseOffset + batchIndex, metadata.offset());
-        assertEquals(keySize, metadata.serializedKeySize());
-        assertEquals(valueSize, metadata.serializedValueSize());
+        RecordMetadata metadata = new RecordMetadata(new TopicPartition("foo", 0), 15L, 3L, timestamp, null,
+                keySize, valueSize);
+        assertEquals(DefaultRecord.computePartialChecksum(timestamp, keySize, valueSize), metadata.checksum());
     }
 
 }

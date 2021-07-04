@@ -64,11 +64,16 @@ class MeteredWindowedKeyValueIterator<K, V> implements KeyValueIterator<Windowed
     }
 
     @Override
+    public void remove() {
+        iter.remove();
+    }
+
+    @Override
     public void close() {
         try {
             iter.close();
         } finally {
-            sensor.record(time.nanoseconds() - startNs);
+            metrics.recordLatency(sensor, startNs, time.nanoseconds());
         }
     }
 

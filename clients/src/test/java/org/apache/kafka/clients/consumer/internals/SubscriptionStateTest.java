@@ -16,22 +16,17 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.Metadata;
-import org.apache.kafka.clients.NodeApiVersions;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
-import org.apache.kafka.clients.consumer.internals.SubscriptionState.LogTruncation;
-import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.message.OffsetForLeaderEpochResponseData.EpochEndOffset;
-import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.requests.EpochEndOffset;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -42,13 +37,10 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import static java.util.Collections.singleton;
-import static org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.UNDEFINED_EPOCH;
-import static org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.UNDEFINED_EPOCH_OFFSET;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class SubscriptionStateTest {
 
@@ -59,7 +51,7 @@ public class SubscriptionStateTest {
     private final TopicPartition tp1 = new TopicPartition(topic, 1);
     private final TopicPartition t1p0 = new TopicPartition(topic1, 0);
     private final MockRebalanceListener rebalanceListener = new MockRebalanceListener();
-    private final Metadata.LeaderAndEpoch leaderAndEpoch = Metadata.LeaderAndEpoch.noLeaderOrEpoch();
+    private final Metadata.LeaderAndEpoch leaderAndEpoch = new Metadata.LeaderAndEpoch(Node.noNode(), Optional.empty());
 
     @Test
     public void partitionAssignment() {
@@ -96,8 +88,7 @@ public class SubscriptionStateTest {
         assertTrue(state.assignedPartitions().isEmpty());
         assertEquals(0, state.numAssignedPartitions());
 
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(t1p0)));
-        state.assignFromSubscribed(singleton(t1p0));
+        assertTrue(state.assignFromSubscribed(singleton(t1p0)));
         // assigned partitions should immediately change
         assertEquals(singleton(t1p0), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
@@ -147,17 +138,13 @@ public class SubscriptionStateTest {
         assertTrue(state.assignedPartitions().isEmpty());
         assertEquals(0, state.numAssignedPartitions());
 
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp1)));
-        state.assignFromSubscribed(singleton(tp1));
-
+        assertTrue(state.assignFromSubscribed(singleton(tp1)));
         // assigned partitions should immediately change
         assertEquals(singleton(tp1), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
         assertEquals(singleton(topic), state.subscription());
 
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(t1p0)));
-        state.assignFromSubscribed(singleton(t1p0));
-
+        assertTrue(state.assignFromSubscribed(Collections.singletonList(t1p0)));
         // assigned partitions should immediately change
         assertEquals(singleton(t1p0), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
@@ -173,9 +160,7 @@ public class SubscriptionStateTest {
         assertEquals(singleton(t1p0), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
 
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp0)));
-        state.assignFromSubscribed(singleton(tp0));
-
+        assertTrue(state.assignFromSubscribed(Collections.singletonList(tp0)));
         // assigned partitions should immediately change
         assertEquals(singleton(tp0), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
@@ -201,8 +186,7 @@ public class SubscriptionStateTest {
 
         Set<TopicPartition> autoAssignment = Utils.mkSet(t1p0);
         state.subscribe(singleton(topic1), rebalanceListener);
-        assertTrue(state.checkAssignmentMatchedSubscription(autoAssignment));
-        state.assignFromSubscribed(autoAssignment);
+        assertTrue(state.assignFromSubscribed(autoAssignment));
         assertEquals(3, state.assignmentId());
         assertEquals(autoAssignment, state.assignedPartitions());
     }
@@ -215,7 +199,7 @@ public class SubscriptionStateTest {
         state.requestOffsetReset(tp0);
         assertFalse(state.isFetchable(tp0));
         assertTrue(state.isOffsetResetNeeded(tp0));
-        assertNull(state.position(tp0));
+        assertNotNull(state.position(tp0));
 
         // seek should clear the reset and make the partition fetchable
         state.seek(tp0, 0);
@@ -229,15 +213,11 @@ public class SubscriptionStateTest {
         assertEquals(1, state.subscription().size());
         assertTrue(state.assignedPartitions().isEmpty());
         assertEquals(0, state.numAssignedPartitions());
-        assertTrue(state.hasAutoAssignedPartitions());
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp0)));
-        state.assignFromSubscribed(singleton(tp0));
-
+        assertTrue(state.partitionsAutoAssigned());
+        assertTrue(state.assignFromSubscribed(singleton(tp0)));
         state.seek(tp0, 1);
         assertEquals(1L, state.position(tp0).offset);
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp1)));
-        state.assignFromSubscribed(singleton(tp1));
-
+        assertTrue(state.assignFromSubscribed(singleton(tp1)));
         assertTrue(state.isAssigned(tp1));
         assertFalse(state.isAssigned(tp0));
         assertFalse(state.isFetchable(tp1));
@@ -256,64 +236,60 @@ public class SubscriptionStateTest {
         assertTrue(state.isFetchable(tp0));
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invalidPositionUpdate() {
         state.subscribe(singleton(topic), rebalanceListener);
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp0)));
-        state.assignFromSubscribed(singleton(tp0));
-
-        assertThrows(IllegalStateException.class, () -> state.position(tp0,
-            new SubscriptionState.FetchPosition(0, Optional.empty(), leaderAndEpoch)));
+        assertTrue(state.assignFromSubscribed(singleton(tp0)));
+        state.position(tp0, new SubscriptionState.FetchPosition(0, Optional.empty(), leaderAndEpoch));
     }
 
     @Test
     public void cantAssignPartitionForUnsubscribedTopics() {
         state.subscribe(singleton(topic), rebalanceListener);
-        assertFalse(state.checkAssignmentMatchedSubscription(Collections.singletonList(t1p0)));
+        assertFalse(state.assignFromSubscribed(Collections.singletonList(t1p0)));
     }
 
     @Test
     public void cantAssignPartitionForUnmatchedPattern() {
         state.subscribe(Pattern.compile(".*t"), rebalanceListener);
         state.subscribeFromPattern(Collections.singleton(topic));
-        assertFalse(state.checkAssignmentMatchedSubscription(Collections.singletonList(t1p0)));
+        assertFalse(state.assignFromSubscribed(Collections.singletonList(t1p0)));
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void cantChangePositionForNonAssignedPartition() {
-        assertThrows(IllegalStateException.class, () -> state.position(tp0,
-            new SubscriptionState.FetchPosition(1, Optional.empty(), leaderAndEpoch)));
+        state.position(tp0, new SubscriptionState.FetchPosition(1, Optional.empty(), leaderAndEpoch));
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void cantSubscribeTopicAndPattern() {
         state.subscribe(singleton(topic), rebalanceListener);
-        assertThrows(IllegalStateException.class, () -> state.subscribe(Pattern.compile(".*"), rebalanceListener));
+        state.subscribe(Pattern.compile(".*"), rebalanceListener);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void cantSubscribePartitionAndPattern() {
         state.assignFromUser(singleton(tp0));
-        assertThrows(IllegalStateException.class, () -> state.subscribe(Pattern.compile(".*"), rebalanceListener));
+        state.subscribe(Pattern.compile(".*"), rebalanceListener);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void cantSubscribePatternAndTopic() {
         state.subscribe(Pattern.compile(".*"), rebalanceListener);
-        assertThrows(IllegalStateException.class, () -> state.subscribe(singleton(topic), rebalanceListener));
+        state.subscribe(singleton(topic), rebalanceListener);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void cantSubscribePatternAndPartition() {
         state.subscribe(Pattern.compile(".*"), rebalanceListener);
-        assertThrows(IllegalStateException.class, () -> state.assignFromUser(singleton(tp0)));
+        state.assignFromUser(singleton(tp0));
     }
 
     @Test
     public void patternSubscription() {
         state.subscribe(Pattern.compile(".*"), rebalanceListener);
         state.subscribeFromPattern(new HashSet<>(Arrays.asList(topic, topic1)));
-        assertEquals(2, state.subscription().size(), "Expected subscribed topics count is incorrect");
+        assertEquals("Expected subscribed topics count is incorrect", 2, state.subscription().size());
     }
 
     @Test
@@ -337,9 +313,7 @@ public class SubscriptionStateTest {
     public void unsubscription() {
         state.subscribe(Pattern.compile(".*"), rebalanceListener);
         state.subscribeFromPattern(new HashSet<>(Arrays.asList(topic, topic1)));
-        assertTrue(state.checkAssignmentMatchedSubscription(singleton(tp1)));
-        state.assignFromSubscribed(singleton(tp1));
-
+        assertTrue(state.assignFromSubscribed(singleton(tp1)));
         assertEquals(singleton(tp1), state.assignedPartitions());
         assertEquals(1, state.numAssignedPartitions());
 
@@ -395,19 +369,15 @@ public class SubscriptionStateTest {
 
         // Seek with no offset epoch requires no validation no matter what the current leader is
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(0L, Optional.empty(),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(5))));
-        assertTrue(state.hasValidPosition(tp0));
-        assertFalse(state.awaitingValidation(tp0));
-        ApiVersions apiVersions = new ApiVersions();
-        apiVersions.update(broker1.idString(), NodeApiVersions.create());
-
-        assertFalse(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.empty())));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(5))));
         assertTrue(state.hasValidPosition(tp0));
         assertFalse(state.awaitingValidation(tp0));
 
-        assertFalse(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(10))));
+        assertFalse(state.maybeValidatePositionForCurrentLeader(tp0, new Metadata.LeaderAndEpoch(broker1, Optional.empty())));
+        assertTrue(state.hasValidPosition(tp0));
+        assertFalse(state.awaitingValidation(tp0));
+
+        assertFalse(state.maybeValidatePositionForCurrentLeader(tp0, new Metadata.LeaderAndEpoch(broker1, Optional.of(10))));
         assertTrue(state.hasValidPosition(tp0));
         assertFalse(state.awaitingValidation(tp0));
     }
@@ -419,12 +389,12 @@ public class SubscriptionStateTest {
 
         // Seek with no offset epoch requires no validation no matter what the current leader is
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(0L, Optional.of(2),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(5))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(5))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
 
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(0L, Optional.empty(),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(5))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(5))));
         assertTrue(state.hasValidPosition(tp0));
         assertFalse(state.awaitingValidation(tp0));
     }
@@ -432,31 +402,25 @@ public class SubscriptionStateTest {
     @Test
     public void testSeekUnvalidatedWithOffsetEpoch() {
         Node broker1 = new Node(1, "localhost", 9092);
-        ApiVersions apiVersions = new ApiVersions();
-        apiVersions.update(broker1.idString(), NodeApiVersions.create());
-
         state.assignFromUser(Collections.singleton(tp0));
 
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(0L, Optional.of(2),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(5))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(5))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
 
         // Update using the current leader and epoch
-        assertTrue(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(5))));
+        assertTrue(state.maybeValidatePositionForCurrentLeader(tp0, new Metadata.LeaderAndEpoch(broker1, Optional.of(5))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
 
         // Update with a newer leader and epoch
-        assertTrue(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(15))));
+        assertTrue(state.maybeValidatePositionForCurrentLeader(tp0, new Metadata.LeaderAndEpoch(broker1, Optional.of(15))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
 
         // If the updated leader has no epoch information, then skip validation and begin fetching
-        assertFalse(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.empty())));
+        assertFalse(state.maybeValidatePositionForCurrentLeader(tp0, new Metadata.LeaderAndEpoch(broker1, Optional.empty())));
         assertTrue(state.hasValidPosition(tp0));
         assertFalse(state.awaitingValidation(tp0));
     }
@@ -467,13 +431,13 @@ public class SubscriptionStateTest {
         state.assignFromUser(Collections.singleton(tp0));
 
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(5),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(10))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
         assertEquals(10L, state.position(tp0).offset);
 
         state.seekValidated(tp0, new SubscriptionState.FetchPosition(8L, Optional.of(4),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(10))));
         assertTrue(state.hasValidPosition(tp0));
         assertFalse(state.awaitingValidation(tp0));
         assertEquals(8L, state.position(tp0).offset);
@@ -485,7 +449,7 @@ public class SubscriptionStateTest {
         state.assignFromUser(Collections.singleton(tp0));
 
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(5),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(10))));
         assertFalse(state.hasValidPosition(tp0));
         assertTrue(state.awaitingValidation(tp0));
         assertEquals(10L, state.position(tp0).offset);
@@ -502,7 +466,7 @@ public class SubscriptionStateTest {
         state.assignFromUser(Collections.singleton(tp0));
 
         state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(5),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
+                new Metadata.LeaderAndEpoch(broker1, Optional.of(10))));
         assertTrue(state.awaitingValidation(tp0));
 
         state.requestOffsetReset(tp0, OffsetResetStrategy.EARLIEST);
@@ -520,45 +484,15 @@ public class SubscriptionStateTest {
         int initialOffsetEpoch = 5;
 
         SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, initialPosition);
         assertTrue(state.awaitingValidation(tp0));
 
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(initialOffsetEpoch)
-                    .setEndOffset(initialOffset + 5));
-        assertEquals(Optional.empty(), truncationOpt);
+        Optional<OffsetAndMetadata> divergentOffsetMetadataOpt = state.maybeCompleteValidation(tp0, initialPosition,
+                new EpochEndOffset(initialOffsetEpoch, initialOffset + 5));
+        assertEquals(Optional.empty(), divergentOffsetMetadataOpt);
         assertFalse(state.awaitingValidation(tp0));
         assertEquals(initialPosition, state.position(tp0));
-    }
-
-    @Test
-    public void testMaybeValidatePositionForCurrentLeader() {
-        NodeApiVersions oldApis = NodeApiVersions.create(ApiKeys.OFFSET_FOR_LEADER_EPOCH.id, (short) 0, (short) 2);
-        ApiVersions apiVersions = new ApiVersions();
-        apiVersions.update("1", oldApis);
-
-        Node broker1 = new Node(1, "localhost", 9092);
-        state.assignFromUser(Collections.singleton(tp0));
-
-        state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(5),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
-
-        // if API is too old to be usable, we just skip validation
-        assertFalse(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(10))));
-        assertTrue(state.hasValidPosition(tp0));
-
-        // New API
-        apiVersions.update("1", NodeApiVersions.create());
-        state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(5),
-                new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(10))));
-
-        // API is too old to be usable, we just skip validation
-        assertTrue(state.maybeValidatePositionForCurrentLeader(apiVersions, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(10))));
-        assertFalse(state.hasValidPosition(tp0));
     }
 
     @Test
@@ -573,19 +507,17 @@ public class SubscriptionStateTest {
         int updateOffsetEpoch = 8;
 
         SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, initialPosition);
         assertTrue(state.awaitingValidation(tp0));
 
         SubscriptionState.FetchPosition updatePosition = new SubscriptionState.FetchPosition(updateOffset,
-                Optional.of(updateOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(updateOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, updatePosition);
 
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(initialOffsetEpoch)
-                    .setEndOffset(initialOffset + 5));
-        assertEquals(Optional.empty(), truncationOpt);
+        Optional<OffsetAndMetadata> divergentOffsetMetadataOpt = state.maybeCompleteValidation(tp0, initialPosition,
+                new EpochEndOffset(initialOffsetEpoch, initialOffset + 5));
+        assertEquals(Optional.empty(), divergentOffsetMetadataOpt);
         assertTrue(state.awaitingValidation(tp0));
         assertEquals(updatePosition, state.position(tp0));
     }
@@ -600,20 +532,17 @@ public class SubscriptionStateTest {
         int initialOffsetEpoch = 5;
 
         SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-            Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, initialPosition);
         assertTrue(state.awaitingValidation(tp0));
 
         state.requestOffsetReset(tp0);
 
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(initialOffsetEpoch)
-                    .setEndOffset(initialOffset + 5));
-        assertEquals(Optional.empty(), truncationOpt);
+        Optional<OffsetAndMetadata> divergentOffsetMetadataOpt = state.maybeCompleteValidation(tp0, initialPosition,
+                new EpochEndOffset(initialOffsetEpoch, initialOffset + 5));
+        assertEquals(Optional.empty(), divergentOffsetMetadataOpt);
         assertFalse(state.awaitingValidation(tp0));
         assertTrue(state.isOffsetResetNeeded(tp0));
-        assertNull(state.position(tp0));
     }
 
     @Test
@@ -628,19 +557,17 @@ public class SubscriptionStateTest {
         int divergentOffsetEpoch = 7;
 
         SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, initialPosition);
         assertTrue(state.awaitingValidation(tp0));
 
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(divergentOffsetEpoch)
-                    .setEndOffset(divergentOffset));
-        assertEquals(Optional.empty(), truncationOpt);
+        Optional<OffsetAndMetadata> divergentOffsetMetadata = state.maybeCompleteValidation(tp0, initialPosition,
+                new EpochEndOffset(divergentOffsetEpoch, divergentOffset));
+        assertEquals(Optional.empty(), divergentOffsetMetadata);
         assertFalse(state.awaitingValidation(tp0));
 
         SubscriptionState.FetchPosition updatedPosition = new SubscriptionState.FetchPosition(divergentOffset,
-                Optional.of(divergentOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(divergentOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         assertEquals(updatedPosition, state.position(tp0));
     }
 
@@ -657,80 +584,22 @@ public class SubscriptionStateTest {
         int divergentOffsetEpoch = 7;
 
         SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
+                Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(broker1, Optional.of(currentEpoch)));
         state.seekUnvalidated(tp0, initialPosition);
         assertTrue(state.awaitingValidation(tp0));
 
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(divergentOffsetEpoch)
-                    .setEndOffset(divergentOffset));
-        assertTrue(truncationOpt.isPresent());
-        LogTruncation truncation = truncationOpt.get();
-
+        Optional<OffsetAndMetadata> divergentOffsetMetadata = state.maybeCompleteValidation(tp0, initialPosition,
+                new EpochEndOffset(divergentOffsetEpoch, divergentOffset));
         assertEquals(Optional.of(new OffsetAndMetadata(divergentOffset, Optional.of(divergentOffsetEpoch), "")),
-                truncation.divergentOffsetOpt);
-        assertEquals(initialPosition, truncation.fetchPosition);
-        assertTrue(state.awaitingValidation(tp0));
-    }
-
-    @Test
-    public void testTruncationDetectionUnknownDivergentOffsetWithResetPolicy() {
-        Node broker1 = new Node(1, "localhost", 9092);
-        state = new SubscriptionState(new LogContext(), OffsetResetStrategy.EARLIEST);
-        state.assignFromUser(Collections.singleton(tp0));
-
-        int currentEpoch = 10;
-        long initialOffset = 10L;
-        int initialOffsetEpoch = 5;
-
-        SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-            Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
-        state.seekUnvalidated(tp0, initialPosition);
-        assertTrue(state.awaitingValidation(tp0));
-
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(UNDEFINED_EPOCH)
-                    .setEndOffset(UNDEFINED_EPOCH_OFFSET));
-        assertEquals(Optional.empty(), truncationOpt);
-        assertFalse(state.awaitingValidation(tp0));
-        assertTrue(state.isOffsetResetNeeded(tp0));
-        assertEquals(OffsetResetStrategy.EARLIEST, state.resetStrategy(tp0));
-    }
-
-    @Test
-    public void testTruncationDetectionUnknownDivergentOffsetWithoutResetPolicy() {
-        Node broker1 = new Node(1, "localhost", 9092);
-        state = new SubscriptionState(new LogContext(), OffsetResetStrategy.NONE);
-        state.assignFromUser(Collections.singleton(tp0));
-
-        int currentEpoch = 10;
-        long initialOffset = 10L;
-        int initialOffsetEpoch = 5;
-
-        SubscriptionState.FetchPosition initialPosition = new SubscriptionState.FetchPosition(initialOffset,
-            Optional.of(initialOffsetEpoch), new Metadata.LeaderAndEpoch(Optional.of(broker1), Optional.of(currentEpoch)));
-        state.seekUnvalidated(tp0, initialPosition);
-        assertTrue(state.awaitingValidation(tp0));
-
-        Optional<LogTruncation> truncationOpt = state.maybeCompleteValidation(tp0, initialPosition,
-                new EpochEndOffset()
-                    .setLeaderEpoch(UNDEFINED_EPOCH)
-                    .setEndOffset(UNDEFINED_EPOCH_OFFSET));
-        assertTrue(truncationOpt.isPresent());
-        LogTruncation truncation = truncationOpt.get();
-
-        assertEquals(Optional.empty(), truncation.divergentOffsetOpt);
-        assertEquals(initialPosition, truncation.fetchPosition);
+                divergentOffsetMetadata);
         assertTrue(state.awaitingValidation(tp0));
     }
 
     private static class MockRebalanceListener implements ConsumerRebalanceListener {
-        Collection<TopicPartition> revoked;
+        public Collection<TopicPartition> revoked;
         public Collection<TopicPartition> assigned;
-        int revokedCount = 0;
-        int assignedCount = 0;
+        public int revokedCount = 0;
+        public int assignedCount = 0;
 
         @Override
         public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
@@ -744,69 +613,6 @@ public class SubscriptionStateTest {
             revokedCount++;
         }
 
-    }
-
-    @Test
-    public void resetOffsetNoValidation() {
-        // Check that offset reset works when we can't validate offsets (older brokers)
-
-        Node broker1 = new Node(1, "localhost", 9092);
-        state.assignFromUser(Collections.singleton(tp0));
-
-        // Reset offsets
-        state.requestOffsetReset(tp0, OffsetResetStrategy.EARLIEST);
-
-        // Attempt to validate with older API version, should do nothing
-        ApiVersions oldApis = new ApiVersions();
-        oldApis.update("1", NodeApiVersions.create(ApiKeys.OFFSET_FOR_LEADER_EPOCH.id, (short) 0, (short) 2));
-        assertFalse(state.maybeValidatePositionForCurrentLeader(oldApis, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.empty())));
-        assertFalse(state.hasValidPosition(tp0));
-        assertFalse(state.awaitingValidation(tp0));
-        assertTrue(state.isOffsetResetNeeded(tp0));
-
-        // Complete the reset via unvalidated seek
-        state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L));
-        assertTrue(state.hasValidPosition(tp0));
-        assertFalse(state.awaitingValidation(tp0));
-        assertFalse(state.isOffsetResetNeeded(tp0));
-
-        // Next call to validate offsets does nothing
-        assertFalse(state.maybeValidatePositionForCurrentLeader(oldApis, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.empty())));
-        assertTrue(state.hasValidPosition(tp0));
-        assertFalse(state.awaitingValidation(tp0));
-        assertFalse(state.isOffsetResetNeeded(tp0));
-
-        // Reset again, and complete it with a seek that would normally require validation
-        state.requestOffsetReset(tp0, OffsetResetStrategy.EARLIEST);
-        state.seekUnvalidated(tp0, new SubscriptionState.FetchPosition(10L, Optional.of(10), new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(2))));
-        // We are now in AWAIT_VALIDATION
-        assertFalse(state.hasValidPosition(tp0));
-        assertTrue(state.awaitingValidation(tp0));
-        assertFalse(state.isOffsetResetNeeded(tp0));
-
-        // Now ensure next call to validate clears the validation state
-        assertFalse(state.maybeValidatePositionForCurrentLeader(oldApis, tp0, new Metadata.LeaderAndEpoch(
-                Optional.of(broker1), Optional.of(2))));
-        assertTrue(state.hasValidPosition(tp0));
-        assertFalse(state.awaitingValidation(tp0));
-        assertFalse(state.isOffsetResetNeeded(tp0));
-    }
-
-    @Test
-    public void nullPositionLagOnNoPosition() {
-        state.assignFromUser(Collections.singleton(tp0));
-
-        assertNull(state.partitionLag(tp0, IsolationLevel.READ_UNCOMMITTED));
-        assertNull(state.partitionLag(tp0, IsolationLevel.READ_COMMITTED));
-
-        state.updateHighWatermark(tp0, 1L);
-        state.updateLastStableOffset(tp0, 1L);
-
-        assertNull(state.partitionLag(tp0, IsolationLevel.READ_UNCOMMITTED));
-        assertNull(state.partitionLag(tp0, IsolationLevel.READ_COMMITTED));
     }
 
 }

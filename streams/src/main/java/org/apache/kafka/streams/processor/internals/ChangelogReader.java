@@ -17,42 +17,32 @@
 package org.apache.kafka.streams.processor.internals;
 
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.streams.processor.TaskId;
 
+import java.util.Collection;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * See {@link StoreChangelogReader}.
+ * Performs bulk read operations from a set of partitions. Used to
+ * restore  {@link org.apache.kafka.streams.processor.StateStore}s from their
+ * change logs
  */
-public interface ChangelogReader extends ChangelogRegister {
+public interface ChangelogReader {
     /**
-     * Restore all registered state stores by reading from their changelogs
+     * Register a state store and it's partition for later restoration.
+     * @param restorer the state restorer to register
      */
-    void restore(final Map<TaskId, Task> tasks);
+    void register(final StateRestorer restorer);
 
     /**
-     * Transit to restore active changelogs mode
+     * Restore all registered state stores by reading from their changelogs.
+     * @return all topic partitions that have been restored
      */
-    void enforceRestoreActive();
+    Collection<TopicPartition> restore(final RestoringTasks active);
 
     /**
-     * Transit to update standby changelogs mode
+     * @return the restored offsets for all persistent stores.
      */
-    void transitToUpdateStandby();
+    Map<TopicPartition, Long> restoredOffsets();
 
-    /**
-     * @return the changelog partitions that have been completed restoring
-     */
-    Set<TopicPartition> completedChangelogs();
-
-    /**
-     * Clear all partitions
-     */
-    void clear();
-
-    /**
-     * @return whether the changelog reader has just been cleared or is uninitialized
-     */
-    boolean isEmpty();
+    void reset();
 }

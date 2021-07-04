@@ -15,11 +15,11 @@ package kafka.api
 import java.io.File
 
 import kafka.server.KafkaConfig
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.junit.{After, Before, Test}
 import kafka.utils.JaasTestUtils
 import org.apache.kafka.common.security.auth.SecurityProtocol
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 
 class SaslMultiMechanismConsumerTest extends BaseConsumerTest with SaslSetup {
   private val kafkaClientSaslMechanism = "PLAIN"
@@ -30,21 +30,21 @@ class SaslMultiMechanismConsumerTest extends BaseConsumerTest with SaslSetup {
   override protected val serverSaslProperties = Some(kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   override protected val clientSaslProperties = Some(kafkaClientSaslProperties(kafkaClientSaslMechanism))
 
-  @BeforeEach
+  @Before
   override def setUp(): Unit = {
     startSasl(jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), Both,
       JaasTestUtils.KafkaServerContextName))
     super.setUp()
   }
 
-  @AfterEach
+  @After
   override def tearDown(): Unit = {
     super.tearDown()
     closeSasl()
   }
 
   @Test
-  def testMultipleBrokerMechanisms(): Unit = {
+  def testMultipleBrokerMechanisms() {
     val plainSaslProducer = createProducer()
     val plainSaslConsumer = createConsumer()
 
@@ -55,41 +55,33 @@ class SaslMultiMechanismConsumerTest extends BaseConsumerTest with SaslSetup {
     var startingOffset = 0
 
     // Test SASL/PLAIN producer and consumer
-    var startingTimestamp = System.currentTimeMillis()
-    sendRecords(plainSaslProducer, numRecords, tp, startingTimestamp = startingTimestamp)
+    sendRecords(plainSaslProducer, numRecords, tp)
     plainSaslConsumer.assign(List(tp).asJava)
     plainSaslConsumer.seek(tp, 0)
-    consumeAndVerifyRecords(consumer = plainSaslConsumer, numRecords = numRecords, startingOffset = startingOffset,
-      startingTimestamp = startingTimestamp)
+    consumeAndVerifyRecords(consumer = plainSaslConsumer, numRecords = numRecords, startingOffset = startingOffset)
     sendAndAwaitAsyncCommit(plainSaslConsumer)
     startingOffset += numRecords
 
     // Test SASL/GSSAPI producer and consumer
-    startingTimestamp = System.currentTimeMillis()
-    sendRecords(gssapiSaslProducer, numRecords, tp, startingTimestamp = startingTimestamp)
+    sendRecords(gssapiSaslProducer, numRecords, tp)
     gssapiSaslConsumer.assign(List(tp).asJava)
     gssapiSaslConsumer.seek(tp, startingOffset)
-    consumeAndVerifyRecords(consumer = gssapiSaslConsumer, numRecords = numRecords, startingOffset = startingOffset,
-      startingTimestamp = startingTimestamp)
+    consumeAndVerifyRecords(consumer = gssapiSaslConsumer, numRecords = numRecords, startingOffset = startingOffset)
     sendAndAwaitAsyncCommit(gssapiSaslConsumer)
     startingOffset += numRecords
 
     // Test SASL/PLAIN producer and SASL/GSSAPI consumer
-    startingTimestamp = System.currentTimeMillis()
-    sendRecords(plainSaslProducer, numRecords, tp, startingTimestamp = startingTimestamp)
+    sendRecords(plainSaslProducer, numRecords, tp)
     gssapiSaslConsumer.assign(List(tp).asJava)
     gssapiSaslConsumer.seek(tp, startingOffset)
-    consumeAndVerifyRecords(consumer = gssapiSaslConsumer, numRecords = numRecords, startingOffset = startingOffset,
-      startingTimestamp = startingTimestamp)
+    consumeAndVerifyRecords(consumer = gssapiSaslConsumer, numRecords = numRecords, startingOffset = startingOffset)
     startingOffset += numRecords
 
     // Test SASL/GSSAPI producer and SASL/PLAIN consumer
-    startingTimestamp = System.currentTimeMillis()
-    sendRecords(gssapiSaslProducer, numRecords, tp, startingTimestamp = startingTimestamp)
+    sendRecords(gssapiSaslProducer, numRecords, tp)
     plainSaslConsumer.assign(List(tp).asJava)
     plainSaslConsumer.seek(tp, startingOffset)
-    consumeAndVerifyRecords(consumer = plainSaslConsumer, numRecords = numRecords, startingOffset = startingOffset,
-      startingTimestamp = startingTimestamp)
+    consumeAndVerifyRecords(consumer = plainSaslConsumer, numRecords = numRecords, startingOffset = startingOffset)
   }
 
 }

@@ -29,7 +29,4 @@ public class SchemaException extends KafkaException {
         super(message);
     }
 
-    public SchemaException(String message, Throwable cause) {
-        super(message, cause);
-    }
 }

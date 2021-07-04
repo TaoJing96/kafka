@@ -17,9 +17,8 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.processor.api.Processor;
-import org.apache.kafka.streams.processor.api.ProcessorContext;
-import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.processor.Processor;
+import org.apache.kafka.streams.processor.ProcessorContext;
 import org.easymock.EasyMock;
 import org.junit.Before;
 import org.junit.Test;
@@ -34,7 +33,7 @@ import static org.junit.Assert.assertEquals;
 public class KStreamPrintTest {
 
     private ByteArrayOutputStream byteOutStream;
-    private Processor<Integer, String, Void, Void> printProcessor;
+    private Processor<Integer, String> printProcessor;
 
     @Before
     public void setUp() {
@@ -46,13 +45,14 @@ public class KStreamPrintTest {
             "test-stream"));
 
         printProcessor = kStreamPrint.get();
-        final ProcessorContext<Void, Void> processorContext = EasyMock.createNiceMock(ProcessorContext.class);
+        final ProcessorContext processorContext = EasyMock.createNiceMock(ProcessorContext.class);
         EasyMock.replay(processorContext);
 
         printProcessor.init(processorContext);
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testPrintStreamWithProvidedKeyValueMapper() {
         final List<KeyValue<Integer, String>> inputRecords = Arrays.asList(
                 new KeyValue<>(0, "zero"),
@@ -67,8 +67,7 @@ public class KStreamPrintTest {
             "[test-stream]: 3, three"};
 
         for (final KeyValue<Integer, String> record: inputRecords) {
-            final Record<Integer, String> r = new Record<>(record.key, record.value, 0L);
-            printProcessor.process(r);
+            printProcessor.process(record.key, record.value);
         }
         printProcessor.close();
 

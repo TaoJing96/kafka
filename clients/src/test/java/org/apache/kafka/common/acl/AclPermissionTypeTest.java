@@ -17,9 +17,9 @@
 
 package org.apache.kafka.common.acl;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.Assert.assertEquals;
 
 public class AclPermissionTypeTest {
     private static class AclPermissionTypeTestInfo {
@@ -46,7 +46,8 @@ public class AclPermissionTypeTest {
     @Test
     public void testIsUnknown() throws Exception {
         for (AclPermissionTypeTestInfo info : INFOS) {
-            assertEquals(info.unknown, info.ty.isUnknown(), info.ty + " was supposed to have unknown == " + info.unknown);
+            assertEquals(info.ty + " was supposed to have unknown == " + info.unknown,
+                info.unknown, info.ty.isUnknown());
         }
     }
 
@@ -54,9 +55,10 @@ public class AclPermissionTypeTest {
     public void testCode() throws Exception {
         assertEquals(AclPermissionType.values().length, INFOS.length);
         for (AclPermissionTypeTestInfo info : INFOS) {
-            assertEquals(info.code, info.ty.code(), info.ty + " was supposed to have code == " + info.code);
-            assertEquals(info.ty, AclPermissionType.fromCode((byte) info.code),
-                "AclPermissionType.fromCode(" + info.code + ") was supposed to be " +  info.ty);
+            assertEquals(info.ty + " was supposed to have code == " + info.code,
+                info.code, info.ty.code());
+            assertEquals("AclPermissionType.fromCode(" + info.code + ") was supposed to be " +  info.ty,
+                info.ty, AclPermissionType.fromCode((byte) info.code));
         }
         assertEquals(AclPermissionType.UNKNOWN, AclPermissionType.fromCode((byte) 120));
     }
@@ -64,8 +66,8 @@ public class AclPermissionTypeTest {
     @Test
     public void testName() throws Exception {
         for (AclPermissionTypeTestInfo info : INFOS) {
-            assertEquals(info.ty, AclPermissionType.fromString(info.name),
-                "AclPermissionType.fromString(" + info.name + ") was supposed to be " +  info.ty);
+            assertEquals("AclPermissionType.fromString(" + info.name + ") was supposed to be " +  info.ty,
+                info.ty, AclPermissionType.fromString(info.name));
         }
         assertEquals(AclPermissionType.UNKNOWN, AclPermissionType.fromString("something"));
     }

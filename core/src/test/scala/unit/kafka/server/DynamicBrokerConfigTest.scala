@@ -17,22 +17,20 @@
 
 package kafka.server
 
-import java.{lang, util}
+import java.util
 import java.util.Properties
-import java.util.concurrent.CompletionStage
 
 import kafka.utils.TestUtils
 import kafka.zk.KafkaZkClient
-import org.apache.kafka.common.{Endpoint, Reconfigurable}
-import org.apache.kafka.common.acl.{AclBinding, AclBindingFilter}
+import org.apache.kafka.common.Reconfigurable
 import org.apache.kafka.common.config.types.Password
 import org.apache.kafka.common.config.{ConfigException, SslConfigs}
-import org.apache.kafka.server.authorizer._
 import org.easymock.EasyMock
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
+import org.junit.Assert._
+import org.junit.Test
+import org.scalatest.Assertions.intercept
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.Set
 
 class DynamicBrokerConfigTest {
@@ -143,7 +141,9 @@ class DynamicBrokerConfigTest {
       override def validateReconfiguration(configs: util.Map[String, _]): Unit = {}
       override def reconfigure(configs: util.Map[String, _]): Unit = {}
     }
-    assertThrows(classOf[IllegalArgumentException], () => config.dynamicConfig.addReconfigurable(createReconfigurable(invalidReconfigurableProps)))
+    intercept[IllegalArgumentException] {
+      config.dynamicConfig.addReconfigurable(createReconfigurable(invalidReconfigurableProps))
+    }
     config.dynamicConfig.addReconfigurable(createReconfigurable(validReconfigurableProps))
 
     def createBrokerReconfigurable(configs: Set[String]) = new BrokerReconfigurable {
@@ -151,7 +151,9 @@ class DynamicBrokerConfigTest {
       override def validateReconfiguration(newConfig: KafkaConfig): Unit = {}
       override def reconfigure(oldConfig: KafkaConfig, newConfig: KafkaConfig): Unit = {}
     }
-    assertThrows(classOf[IllegalArgumentException], () => config.dynamicConfig.addBrokerReconfigurable(createBrokerReconfigurable(invalidReconfigurableProps)))
+    intercept[IllegalArgumentException] {
+      config.dynamicConfig.addBrokerReconfigurable(createBrokerReconfigurable(invalidReconfigurableProps))
+    }
     config.dynamicConfig.addBrokerReconfigurable(createBrokerReconfigurable(validReconfigurableProps))
   }
 
@@ -192,16 +194,7 @@ class DynamicBrokerConfigTest {
     verifyConfigUpdate(listenerMaxConnectionsProp, "10", perBrokerConfig = false, expectFailure = false)
   }
 
-  @Test
-  def testConnectionRateQuota(): Unit = {
-    verifyConfigUpdate(KafkaConfig.MaxConnectionCreationRateProp, "110", perBrokerConfig = true, expectFailure = false)
-    verifyConfigUpdate(KafkaConfig.MaxConnectionCreationRateProp, "120", perBrokerConfig = false, expectFailure = false)
-    val listenerMaxConnectionsProp = s"listener.name.external.${KafkaConfig.MaxConnectionCreationRateProp}"
-    verifyConfigUpdate(listenerMaxConnectionsProp, "20", perBrokerConfig = true, expectFailure = false)
-    verifyConfigUpdate(listenerMaxConnectionsProp, "30", perBrokerConfig = false, expectFailure = false)
-  }
-
-  private def verifyConfigUpdate(name: String, value: Object, perBrokerConfig: Boolean, expectFailure: Boolean): Unit = {
+  private def verifyConfigUpdate(name: String, value: Object, perBrokerConfig: Boolean, expectFailure: Boolean) {
     val configProps = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 8181)
     configProps.put(KafkaConfig.PasswordEncoderSecretProp, "broker.secret")
     val config = KafkaConfig(configProps)
@@ -220,7 +213,12 @@ class DynamicBrokerConfigTest {
       updateConfig()
       assertEquals(value, config.originals.get(name))
     } else {
-      assertThrows(classOf[Exception], () => config.dynamicConfig.validate(props, perBrokerConfig))
+      try {
+        config.dynamicConfig.validate(props, perBrokerConfig)
+        fail("Invalid config did not fail validation")
+      } catch {
+        case e: Exception => // expected exception
+      }
       updateConfig()
       assertEquals(oldValue, config.originals.get(name))
     }
@@ -236,7 +234,12 @@ class DynamicBrokerConfigTest {
 
     // DynamicBrokerConfig#validate is used by AdminClient to validate the configs provided in
     // in an AlterConfigs request. Validation should fail with an exception if any of the configs are invalid.
-    assertThrows(classOf[ConfigException], () => config.dynamicConfig.validate(props, perBrokerConfig = true))
+    try {
+      config.dynamicConfig.validate(props, perBrokerConfig = true)
+      fail("Invalid config did not fail validation")
+    } catch {
+      case e: ConfigException => // expected exception
+    }
 
     // DynamicBrokerConfig#updateBrokerConfig is used to update configs from ZooKeeper during
     // startup and when configs are updated in ZK. Update should apply valid configs and ignore
@@ -263,8 +266,8 @@ class DynamicBrokerConfigTest {
       case e: ConfigException => // expected exception
     }
     val persistedProps = configWithSecret.dynamicConfig.toPersistentProps(dynamicProps, perBrokerConfig = true)
-    assertFalse(persistedProps.getProperty(KafkaConfig.SaslJaasConfigProp).contains("myLoginModule"),
-      "Password not encoded")
+    assertFalse("Password not encoded",
+      persistedProps.getProperty(KafkaConfig.SaslJaasConfigProp).contains("myLoginModule"))
     val decodedProps = configWithSecret.dynamicConfig.fromPersistentProps(persistedProps, perBrokerConfig = true)
     assertEquals("myLoginModule required;", decodedProps.getProperty(KafkaConfig.SaslJaasConfigProp))
   }
@@ -279,8 +282,8 @@ class DynamicBrokerConfigTest {
     dynamicProps.put(KafkaConfig.SaslJaasConfigProp, "dynamicLoginModule required;")
 
     val persistedProps = config.dynamicConfig.toPersistentProps(dynamicProps, perBrokerConfig = true)
-    assertFalse(persistedProps.getProperty(KafkaConfig.SaslJaasConfigProp).contains("LoginModule"),
-      "Password not encoded")
+    assertFalse("Password not encoded",
+      persistedProps.getProperty(KafkaConfig.SaslJaasConfigProp).contains("LoginModule"))
     config.dynamicConfig.updateBrokerConfig(0, persistedProps)
     assertEquals("dynamicLoginModule required;", config.values.get(KafkaConfig.SaslJaasConfigProp).asInstanceOf[Password].value)
 
@@ -312,45 +315,10 @@ class DynamicBrokerConfigTest {
     EasyMock.replay(kafkaServer)
 
     props.put(KafkaConfig.ListenersProp, "PLAINTEXT://hostname:9092,SASL_PLAINTEXT://hostname:9093")
-    new DynamicListenerConfig(kafkaServer).validateReconfiguration(KafkaConfig(props))
+    val newConfig = KafkaConfig(props)
 
-    // it is illegal to update non-reconfiguable configs of existent listeners
-    props.put("listener.name.plaintext.you.should.not.pass", "failure")
     val dynamicListenerConfig = new DynamicListenerConfig(kafkaServer)
-    assertThrows(classOf[ConfigException], () => dynamicListenerConfig.validateReconfiguration(KafkaConfig(props)))
-  }
-
-  @Test
-  def testAuthorizerConfig(): Unit = {
-    val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 9092)
-    val oldConfig =  KafkaConfig.fromProps(props)
-    val kafkaServer: KafkaServer = EasyMock.createMock(classOf[kafka.server.KafkaServer])
-
-    class TestAuthorizer extends Authorizer with Reconfigurable {
-      @volatile var superUsers = ""
-      override def start(serverInfo: AuthorizerServerInfo): util.Map[Endpoint, _ <: CompletionStage[Void]] = Map.empty.asJava
-      override def authorize(requestContext: AuthorizableRequestContext, actions: util.List[Action]): util.List[AuthorizationResult] = null
-      override def createAcls(requestContext: AuthorizableRequestContext, aclBindings: util.List[AclBinding]): util.List[_ <: CompletionStage[AclCreateResult]] = null
-      override def deleteAcls(requestContext: AuthorizableRequestContext, aclBindingFilters: util.List[AclBindingFilter]): util.List[_ <: CompletionStage[AclDeleteResult]] = null
-      override def acls(filter: AclBindingFilter): lang.Iterable[AclBinding] = null
-      override def close(): Unit = {}
-      override def configure(configs: util.Map[String, _]): Unit = {}
-      override def reconfigurableConfigs(): util.Set[String] = Set("super.users").asJava
-      override def validateReconfiguration(configs: util.Map[String, _]): Unit = {}
-      override def reconfigure(configs: util.Map[String, _]): Unit = {
-        superUsers = configs.get("super.users").toString
-      }
-    }
-
-    val authorizer = new TestAuthorizer
-    EasyMock.expect(kafkaServer.config).andReturn(oldConfig).anyTimes()
-    EasyMock.expect(kafkaServer.authorizer).andReturn(Some(authorizer)).anyTimes()
-    EasyMock.replay(kafkaServer)
-    // We are only testing authorizer reconfiguration, ignore any exceptions due to incomplete mock
-    assertThrows(classOf[Throwable], () => kafkaServer.config.dynamicConfig.addReconfigurables(kafkaServer))
-    props.put("super.users", "User:admin")
-    kafkaServer.config.dynamicConfig.updateBrokerConfig(0, props)
-    assertEquals("User:admin", authorizer.superUsers)
+    dynamicListenerConfig.validateReconfiguration(newConfig)
   }
 
   @Test
@@ -380,33 +348,6 @@ class DynamicBrokerConfigTest {
     newprops.put(KafkaConfig.NumIoThreadsProp, "10")
     newprops.put(KafkaConfig.BackgroundThreadsProp, "100")
     dynamicBrokerConfig.updateBrokerConfig(0, newprops)
-  }
-
-  @Test
-  def testImproperConfigsAreRemoved(): Unit = {
-    val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect)
-    val configs = KafkaConfig(props)
-
-    assertEquals(Defaults.MaxConnections, configs.maxConnections)
-    assertEquals(Defaults.MessageMaxBytes, configs.messageMaxBytes)
-
-    var newProps = new Properties()
-    newProps.put(KafkaConfig.MaxConnectionsProp, "9999")
-    newProps.put(KafkaConfig.MessageMaxBytesProp, "2222")
-
-    configs.dynamicConfig.updateDefaultConfig(newProps)
-    assertEquals(9999, configs.maxConnections)
-    assertEquals(2222, configs.messageMaxBytes)
-
-    newProps = new Properties()
-    newProps.put(KafkaConfig.MaxConnectionsProp, "INVALID_INT")
-    newProps.put(KafkaConfig.MessageMaxBytesProp, "1111")
-
-    configs.dynamicConfig.updateDefaultConfig(newProps)
-    // Invalid value should be skipped and reassigned as default value
-    assertEquals(Defaults.MaxConnections, configs.maxConnections)
-    // Even if One property is invalid, the below should get correctly updated.
-    assertEquals(1111, configs.messageMaxBytes)
   }
 }
 

@@ -16,13 +16,10 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
+import org.apache.kafka.streams.processor.ProcessorContext;
 
-import java.io.File;
 import java.io.IOException;
-import java.util.Map;
 import java.util.Objects;
 
 class TimestampedSegment extends RocksDBTimestampedStore implements Comparable<TimestampedSegment>, Segment {
@@ -30,9 +27,8 @@ class TimestampedSegment extends RocksDBTimestampedStore implements Comparable<T
 
     TimestampedSegment(final String segmentName,
                        final String windowName,
-                       final long id,
-                       final RocksDBMetricsRecorder metricsRecorder) {
-        super(segmentName, windowName, metricsRecorder);
+                       final long id) {
+        super(segmentName, windowName);
         this.id = id;
     }
 
@@ -42,19 +38,15 @@ class TimestampedSegment extends RocksDBTimestampedStore implements Comparable<T
     }
 
     @Override
-    public void deleteRange(final Bytes keyFrom, final Bytes keyTo) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public int compareTo(final TimestampedSegment segment) {
         return Long.compare(id, segment.id);
     }
 
     @Override
-    public void openDB(final Map<String, Object> configs, final File stateDir) {
-        super.openDB(configs, stateDir);
+    public void openDB(final ProcessorContext context) {
+        super.openDB(context);
         // skip the registering step
+        internalProcessorContext = context;
     }
 
     @Override

@@ -77,7 +77,6 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
     @Override
     public void stop() {
-        log.info("Stopped {} connector {}", this.getClass().getSimpleName(), connectorName);
         connectorHandle.recordConnectorStop();
     }
 
@@ -90,10 +89,10 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
         private String connectorName;
         private String taskId;
-        TaskHandle taskHandle;
-        Set<TopicPartition> assignments;
-        Map<TopicPartition, Long> committedOffsets;
-        Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
+        private TaskHandle taskHandle;
+        private Set<TopicPartition> assignments;
+        private Map<TopicPartition, Long> committedOffsets;
+        private Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
 
         public MonitorableSinkTask() {
             this.assignments = new HashSet<>();
@@ -125,7 +124,7 @@ public class MonitorableSinkConnector extends TestSinkConnector {
         @Override
         public void put(Collection<SinkRecord> records) {
             for (SinkRecord rec : records) {
-                taskHandle.record(rec);
+                taskHandle.record();
                 TopicPartition tp = cachedTopicPartitions
                         .computeIfAbsent(rec.topic(), v -> new HashMap<>())
                         .computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
@@ -154,7 +153,6 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
         @Override
         public void stop() {
-            log.info("Stopped {} task {}", this.getClass().getSimpleName(), taskId);
             taskHandle.recordTaskStop();
         }
     }

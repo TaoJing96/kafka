@@ -23,16 +23,16 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.HashMap;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class AdminMetadataManagerTest {
     private final MockTime time = new MockTime();
@@ -83,7 +83,13 @@ public class AdminMetadataManagerTest {
         mgr.transitionToUpdatePending(time.milliseconds());
         mgr.updateFailed(new AuthenticationException("Authentication failed"));
         assertEquals(refreshBackoffMs, mgr.metadataFetchDelayMs(time.milliseconds()));
-        assertThrows(AuthenticationException.class, mgr::isReady);
+        try {
+            mgr.isReady();
+            fail("Expected AuthenticationException to be thrown");
+        } catch (AuthenticationException e) {
+            // Expected
+        }
+
         mgr.update(mockCluster(), time.milliseconds());
         assertTrue(mgr.isReady());
     }

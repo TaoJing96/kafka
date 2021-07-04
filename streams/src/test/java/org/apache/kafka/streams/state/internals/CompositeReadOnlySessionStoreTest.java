@@ -17,13 +17,10 @@
 package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StoreQueryParameters;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.SessionWindow;
-import org.apache.kafka.streams.state.ReadOnlySessionStore;
 import org.apache.kafka.streams.state.KeyValueIterator;
-import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.QueryableStoreTypes;
 import org.apache.kafka.test.ReadOnlySessionStoreStub;
 import org.apache.kafka.test.StateStoreProviderStub;
@@ -32,15 +29,14 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
-import static java.util.Collections.singletonList;
 import static org.apache.kafka.test.StreamsTestUtils.toList;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsEqual.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
 public class CompositeReadOnlySessionStoreTest {
@@ -56,11 +52,11 @@ public class CompositeReadOnlySessionStoreTest {
     public void before() {
         stubProviderOne.addStore(storeName, underlyingSessionStore);
         stubProviderOne.addStore("other-session-store", otherUnderlyingStore);
-        final QueryableStoreType<ReadOnlySessionStore<Object, Object>> queryableStoreType = QueryableStoreTypes.sessionStore();
+
 
         sessionStore = new CompositeReadOnlySessionStore<>(
-            new WrappingStoreProvider(Arrays.asList(stubProviderOne, stubProviderTwo), StoreQueryParameters.fromNameAndType(storeName, queryableStoreType)),
-            QueryableStoreTypes.sessionStore(), storeName);
+                new WrappingStoreProvider(Arrays.<StateStoreProvider>asList(stubProviderOne, stubProviderTwo)),
+                QueryableStoreTypes.<String, Long>sessionStore(), storeName);
     }
 
     @Test
@@ -94,8 +90,8 @@ public class CompositeReadOnlySessionStoreTest {
         final List<KeyValue<Windowed<String>, Long>> keyOneResults = toList(sessionStore.fetch("key-one"));
         final List<KeyValue<Windowed<String>, Long>> keyTwoResults = toList(sessionStore.fetch("key-two"));
 
-        assertEquals(singletonList(KeyValue.pair(keyOne, 0L)), keyOneResults);
-        assertEquals(singletonList(KeyValue.pair(keyTwo, 10L)), keyTwoResults);
+        assertEquals(Collections.singletonList(KeyValue.pair(keyOne, 0L)), keyOneResults);
+        assertEquals(Collections.singletonList(KeyValue.pair(keyTwo, 10L)), keyTwoResults);
     }
 
     @Test
@@ -109,17 +105,15 @@ public class CompositeReadOnlySessionStoreTest {
         assertFalse(result.hasNext());
     }
 
-    @Test
+    @Test(expected = InvalidStateStoreException.class)
     public void shouldThrowInvalidStateStoreExceptionOnRebalance() {
-        final QueryableStoreType<ReadOnlySessionStore<Object, Object>> queryableStoreType = QueryableStoreTypes.sessionStore();
         final CompositeReadOnlySessionStore<String, String> store =
             new CompositeReadOnlySessionStore<>(
-                new WrappingStoreProvider(singletonList(new StateStoreProviderStub(true)), StoreQueryParameters.fromNameAndType("whateva", queryableStoreType)),
+                new StateStoreProviderStub(true),
                 QueryableStoreTypes.sessionStore(),
-                "whateva"
-            );
+                "whateva");
 
-        assertThrows(InvalidStateStoreException.class, () -> store.fetch("a"));
+        store.fetch("a");
     }
 
     @Test
@@ -131,9 +125,9 @@ public class CompositeReadOnlySessionStoreTest {
         } catch (final InvalidStateStoreException e) { }
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerExceptionIfFetchingNullKey() {
-        assertThrows(NullPointerException.class, () -> sessionStore.fetch(null));
+        sessionStore.fetch(null);
     }
 
     @Test
@@ -147,18 +141,18 @@ public class CompositeReadOnlySessionStoreTest {
         assertThat(results.size(), equalTo(2));
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNPEIfKeyIsNull() {
-        assertThrows(NullPointerException.class, () -> underlyingSessionStore.fetch(null));
+        underlyingSessionStore.fetch(null);
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNPEIfFromKeyIsNull() {
-        assertThrows(NullPointerException.class, () -> underlyingSessionStore.fetch(null, "a"));
+        underlyingSessionStore.fetch(null, "a");
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowNPEIfToKeyIsNull() {
-        assertThrows(NullPointerException.class, () -> underlyingSessionStore.fetch("a", null));
+        underlyingSessionStore.fetch("a", null);
     }
 }

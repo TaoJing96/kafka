@@ -42,7 +42,7 @@ public class InMemorySessionBytesStoreSupplier implements SessionBytesStoreSuppl
 
     @Override
     public String metricsScope() {
-        return "in-memory-session";
+        return "in-memory-session-state";
     }
 
     // In-memory store is not *really* segmented, so just say it is 1 (for ordering consistency with caching enabled)

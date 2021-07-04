@@ -16,69 +16,59 @@
  */
 package kafka.common
 
-import java.util.Map.Entry
 import java.util.{ArrayDeque, ArrayList, Collection, Collections, HashMap, Iterator}
+import java.util.Map.Entry
+
 import kafka.utils.ShutdownableThread
-import org.apache.kafka.clients.{ClientRequest, ClientResponse, KafkaClient, RequestCompletionHandler}
+import org.apache.kafka.clients.{ClientRequest, ClientResponse, NetworkClient, RequestCompletionHandler}
 import org.apache.kafka.common.Node
-import org.apache.kafka.common.errors.{AuthenticationException, DisconnectException}
+import org.apache.kafka.common.errors.AuthenticationException
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.requests.AbstractRequest
 import org.apache.kafka.common.utils.Time
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 
 /**
  *  Class for inter-broker send thread that utilize a non-blocking network client.
  */
-abstract class InterBrokerSendThread(
-  name: String,
-  networkClient: KafkaClient,
-  requestTimeoutMs: Int,
-  time: Time,
-  isInterruptible: Boolean = true
-) extends ShutdownableThread(name, isInterruptible) {
-
-  private val unsentRequests = new UnsentRequests
+abstract class InterBrokerSendThread(name: String,
+                                     networkClient: NetworkClient,
+                                     time: Time,
+                                     isInterruptible: Boolean = true)
+  extends ShutdownableThread(name, isInterruptible) {
 
   def generateRequests(): Iterable[RequestAndCompletionHandler]
+  def requestTimeoutMs: Int
+  private val unsentRequests = new UnsentRequests
 
-  def hasUnsentRequests: Boolean = unsentRequests.iterator().hasNext
+  def hasUnsentRequests = unsentRequests.iterator().hasNext
 
   override def shutdown(): Unit = {
     initiateShutdown()
-    networkClient.initiateClose()
+    // wake up the thread in case it is blocked inside poll
+    networkClient.wakeup()
     awaitShutdown()
-    networkClient.close()
   }
 
-  private def drainGeneratedRequests(): Unit = {
+  override def doWork() {
+    var now = time.milliseconds()
+
     generateRequests().foreach { request =>
+      val completionHandler = request.handler
       unsentRequests.put(request.destination,
-        networkClient.newClientRequest(
-          request.destination.idString,
-          request.request,
-          request.creationTimeMs,
-          true,
-          requestTimeoutMs,
-          request.handler
-        ))
+        networkClient.newClientRequest(request.destination.idString, request.request, now, true,
+          requestTimeoutMs, completionHandler))
     }
-  }
 
-  protected def pollOnce(maxTimeoutMs: Long): Unit = {
     try {
-      drainGeneratedRequests()
-      var now = time.milliseconds()
-      val timeout = sendRequests(now, maxTimeoutMs)
+      val timeout = sendRequests(now)
       networkClient.poll(timeout, now)
       now = time.milliseconds()
       checkDisconnects(now)
       failExpiredRequests(now)
       unsentRequests.clean()
     } catch {
-      case _: DisconnectException if !networkClient.active() =>
-        // DisconnectException is expected when NetworkClient#initiateClose is called
       case e: FatalExitError => throw e
       case t: Throwable =>
         error(s"unhandled exception caught in InterBrokerSendThread", t)
@@ -90,12 +80,8 @@ abstract class InterBrokerSendThread(
     }
   }
 
-  override def doWork(): Unit = {
-    pollOnce(Long.MaxValue)
-  }
-
-  private def sendRequests(now: Long, maxTimeoutMs: Long): Long = {
-    var pollTimeout = maxTimeoutMs
+  private def sendRequests(now: Long): Long = {
+    var pollTimeout = Long.MaxValue
     for (node <- unsentRequests.nodes.asScala) {
       val requestIterator = unsentRequests.requestIterator(node)
       while (requestIterator.hasNext) {
@@ -152,12 +138,8 @@ abstract class InterBrokerSendThread(
   def wakeup(): Unit = networkClient.wakeup()
 }
 
-case class RequestAndCompletionHandler(
-  creationTimeMs: Long,
-  destination: Node,
-  request: AbstractRequest.Builder[_ <: AbstractRequest],
-  handler: RequestCompletionHandler
-)
+case class RequestAndCompletionHandler(destination: Node, request: AbstractRequest.Builder[_ <: AbstractRequest],
+                                       handler: RequestCompletionHandler)
 
 private class UnsentRequests {
   private val unsent = new HashMap[Node, ArrayDeque[ClientRequest]]
@@ -210,5 +192,5 @@ private class UnsentRequests {
       requests.iterator
   }
 
-  def nodes: java.util.Set[Node] = unsent.keySet
+  def nodes = unsent.keySet
 }

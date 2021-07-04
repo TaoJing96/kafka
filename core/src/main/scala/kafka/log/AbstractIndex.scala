@@ -24,18 +24,21 @@ import java.nio.{ByteBuffer, MappedByteBuffer}
 import java.util.concurrent.locks.{Lock, ReentrantLock}
 
 import kafka.common.IndexOffsetOverflowException
+import kafka.log.IndexSearchType.IndexSearchEntity
 import kafka.utils.CoreUtils.inLock
 import kafka.utils.{CoreUtils, Logging}
-import org.apache.kafka.common.utils.{ByteBufferUnmapper, OperatingSystem, Utils}
+import org.apache.kafka.common.utils.{MappedByteBuffers, OperatingSystem, Utils}
+
+import scala.math.ceil
 
 /**
  * The abstract index class which holds entry format agnostic methods.
  *
- * @param _file The index file
+ * @param file The index file
  * @param baseOffset the base offset of the segment that this index is corresponding to.
  * @param maxIndexSize The maximum index size in bytes.
  */
-abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: Long, val maxIndexSize: Int = -1,
+abstract class AbstractIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSize: Int = -1,
                              val writable: Boolean) extends Closeable {
   import AbstractIndex._
 
@@ -152,15 +155,11 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
    */
   def isFull: Boolean = _entries >= _maxEntries
 
-  def file: File = _file
-
   def maxEntries: Int = _maxEntries
 
   def entries: Int = _entries
 
   def length: Long = _length
-
-  def updateParentDir(parentDir: File): Unit = _file = new File(parentDir, file.getName)
 
   /**
    * Reset the size of the memory map and the underneath file. This is used in two kinds of cases: (1) in
@@ -183,8 +182,8 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
         try {
           val position = mmap.position()
 
-          /* Windows or z/OS won't let us modify the file length while the file is mmapped :-( */
-          if (OperatingSystem.IS_WINDOWS || OperatingSystem.IS_ZOS)
+          /* Windows won't let us modify the file length while the file is mmapped :-( */
+          if (OperatingSystem.IS_WINDOWS)
             safeForceUnmap()
           raf.setLength(roundedNewSize)
           _length = roundedNewSize
@@ -206,15 +205,15 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
    *
    * @throws IOException if rename fails
    */
-  def renameTo(f: File): Unit = {
-    try Utils.atomicMoveWithFallback(file.toPath, f.toPath, false)
-    finally _file = f
+  def renameTo(f: File) {
+    try Utils.atomicMoveWithFallback(file.toPath, f.toPath)
+    finally file = f
   }
 
   /**
    * Flush the data in the index to disk
    */
-  def flush(): Unit = {
+  def flush() {
     inLock(lock) {
       mmap.force()
     }
@@ -236,7 +235,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
    * Trim this segment to fit just the valid entries, deleting all trailing unwritten bytes from
    * the file.
    */
-  def trimToValidSize(): Unit = {
+  def trimToValidSize() {
     inLock(lock) {
       resize(entrySize * _entries)
     }
@@ -248,7 +247,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
   def sizeInBytes: Int = entrySize * _entries
 
   /** Close the index */
-  def close(): Unit = {
+  def close() {
     trimToValidSize()
     closeHandler()
   }
@@ -310,33 +309,31 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
   }
 
   protected def safeForceUnmap(): Unit = {
-    if (mmap != null) {
-      try forceUnmap()
-      catch {
-        case t: Throwable => error(s"Error unmapping index $file", t)
-      }
+    try forceUnmap()
+    catch {
+      case t: Throwable => error(s"Error unmapping index $file", t)
     }
   }
 
   /**
    * Forcefully free the buffer's mmap.
    */
-  protected[log] def forceUnmap(): Unit = {
-    try ByteBufferUnmapper.unmap(file.getAbsolutePath, mmap)
+  protected[log] def forceUnmap() {
+    try MappedByteBuffers.unmap(file.getAbsolutePath, mmap)
     finally mmap = null // Accessing unmapped mmap crashes JVM by SEGV so we null it out to be safe
   }
 
   /**
-   * Execute the given function in a lock only if we are running on windows or z/OS. We do this
-   * because Windows or z/OS won't let us resize a file while it is mmapped. As a result we have to force unmap it
+   * Execute the given function in a lock only if we are running on windows. We do this
+   * because Windows won't let us resize a file while it is mmapped. As a result we have to force unmap it
    * and this requires synchronizing reads.
    */
   protected def maybeLock[T](lock: Lock)(fun: => T): T = {
-    if (OperatingSystem.IS_WINDOWS || OperatingSystem.IS_ZOS)
+    if (OperatingSystem.IS_WINDOWS)
       lock.lock()
     try fun
     finally {
-      if (OperatingSystem.IS_WINDOWS || OperatingSystem.IS_ZOS)
+      if (OperatingSystem.IS_WINDOWS)
         lock.unlock()
     }
   }
@@ -358,19 +355,19 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
    * @param target The index key to look for
    * @return The slot found or -1 if the least entry in the index is larger than the target key or the index is empty
    */
-  protected def largestLowerBoundSlotFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchType): Int =
+  protected def largestLowerBoundSlotFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchEntity): Int =
     indexSlotRangeFor(idx, target, searchEntity)._1
 
   /**
    * Find the smallest entry greater than or equal the target key or value. If none can be found, -1 is returned.
    */
-  protected def smallestUpperBoundSlotFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchType): Int =
+  protected def smallestUpperBoundSlotFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchEntity): Int =
     indexSlotRangeFor(idx, target, searchEntity)._2
 
   /**
    * Lookup lower and upper bounds for the given target.
    */
-  private def indexSlotRangeFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchType): (Int, Int) = {
+  private def indexSlotRangeFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchEntity): (Int, Int) = {
     // check if the index is empty
     if(_entries == 0)
       return (-1, -1)
@@ -380,7 +377,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
       var lo = begin
       var hi = end
       while(lo < hi) {
-        val mid = (lo + hi + 1) >>> 1
+        val mid = ceil(hi/2.0 + lo/2.0).toInt
         val found = parseEntry(idx, mid)
         val compareResult = compareIndexEntry(found, target, searchEntity)
         if(compareResult > 0)
@@ -406,10 +403,10 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
     binarySearch(0, firstHotEntry)
   }
 
-  private def compareIndexEntry(indexEntry: IndexEntry, target: Long, searchEntity: IndexSearchType): Int = {
+  private def compareIndexEntry(indexEntry: IndexEntry, target: Long, searchEntity: IndexSearchEntity): Int = {
     searchEntity match {
-      case IndexSearchType.KEY => java.lang.Long.compare(indexEntry.indexKey, target)
-      case IndexSearchType.VALUE => java.lang.Long.compare(indexEntry.indexValue, target)
+      case IndexSearchType.KEY => indexEntry.indexKey.compareTo(target)
+      case IndexSearchType.VALUE => indexEntry.indexValue.compareTo(target)
     }
   }
 
@@ -433,8 +430,7 @@ object AbstractIndex extends Logging {
   override val loggerName: String = classOf[AbstractIndex].getName
 }
 
-sealed trait IndexSearchType
-object IndexSearchType {
-  case object KEY extends IndexSearchType
-  case object VALUE extends IndexSearchType
+object IndexSearchType extends Enumeration {
+  type IndexSearchEntity = Value
+  val KEY, VALUE = Value
 }

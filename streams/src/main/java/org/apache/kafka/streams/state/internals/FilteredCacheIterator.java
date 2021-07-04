@@ -61,6 +61,10 @@ class FilteredCacheIterator implements PeekingKeyValueIterator<Bytes, LRUCacheEn
                 return KeyValue.pair(cacheFunction.key(next.key), next.value);
             }
 
+            @Override
+            public void remove() {
+                cacheIterator.remove();
+            }
         };
     }
 
@@ -89,6 +93,11 @@ class FilteredCacheIterator implements PeekingKeyValueIterator<Bytes, LRUCacheEn
         }
         return cacheIterator.next();
 
+    }
+
+    @Override
+    public void remove() {
+        throw new UnsupportedOperationException();
     }
 
     @Override

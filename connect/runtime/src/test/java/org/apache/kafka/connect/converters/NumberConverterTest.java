@@ -26,7 +26,6 @@ import org.junit.Test;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 
 public abstract class NumberConverterTest<T extends Number> {
     private static final String TOPIC = "topic";
@@ -72,30 +71,29 @@ public abstract class NumberConverterTest<T extends Number> {
         }
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testDeserializingDataWithTooManyBytes() {
-        assertThrows(DataException.class, () -> converter.toConnectData(TOPIC, new byte[10]));
+        converter.toConnectData(TOPIC, new byte[10]);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testDeserializingHeaderWithTooManyBytes() {
-        assertThrows(DataException.class, () -> converter.toConnectHeader(TOPIC, HEADER_NAME, new byte[10]));
+        converter.toConnectHeader(TOPIC, HEADER_NAME, new byte[10]);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testSerializingIncorrectType() {
-        assertThrows(DataException.class, () -> converter.fromConnectData(TOPIC, schema, "not a valid number"));
+        converter.fromConnectData(TOPIC, schema, "not a valid number");
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testSerializingIncorrectHeader() {
-        assertThrows(DataException.class,
-            () -> converter.fromConnectHeader(TOPIC, HEADER_NAME, schema, "not a valid number"));
+        converter.fromConnectHeader(TOPIC, HEADER_NAME, schema, "not a valid number");
     }
 
     @Test
     public void testNullToBytes() {
-        assertNull(converter.fromConnectData(TOPIC, schema, null));
+        assertEquals(null, converter.fromConnectData(TOPIC, schema, null));
     }
 
     @Test

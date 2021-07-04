@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Manages the metadata for KafkaAdminClient.
@@ -38,7 +37,7 @@ import java.util.Optional;
  * service thread (which also uses the NetworkClient).
  */
 public class AdminMetadataManager {
-    private final Logger log;
+    private Logger log;
 
     /**
      * The minimum amount of time that we should wait between subsequent
@@ -101,19 +100,23 @@ public class AdminMetadataManager {
         }
 
         @Override
-        public void handleServerDisconnect(long now, String destinationId, Optional<AuthenticationException> maybeFatalException) {
-            maybeFatalException.ifPresent(AdminMetadataManager.this::updateFailed);
+        public void handleDisconnection(String destination) {
+            // Do nothing
+        }
+
+        @Override
+        public void handleFatalException(KafkaException e) {
+            updateFailed(e);
+        }
+
+        @Override
+        public void handleCompletedMetadataResponse(RequestHeader requestHeader, long now, MetadataResponse metadataResponse) {
+            // Do nothing
+        }
+
+        @Override
+        public void requestUpdate() {
             AdminMetadataManager.this.requestUpdate();
-        }
-
-        @Override
-        public void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException) {
-            // Do nothing
-        }
-
-        @Override
-        public void handleSuccessfulResponse(RequestHeader requestHeader, long now, MetadataResponse metadataResponse) {
-            // Do nothing
         }
 
         @Override

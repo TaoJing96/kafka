@@ -387,11 +387,21 @@ public class ConnectProtocol {
             // Using LinkedHashMap preserves the ordering, which is helpful for tests and debugging
             Map<String, Collection<Integer>> taskMap = new LinkedHashMap<>();
             for (String connectorId : new HashSet<>(connectorIds)) {
-                taskMap.computeIfAbsent(connectorId, key -> new ArrayList<>()).add(CONNECTOR_TASK);
+                Collection<Integer> connectorTasks = taskMap.get(connectorId);
+                if (connectorTasks == null) {
+                    connectorTasks = new ArrayList<>();
+                    taskMap.put(connectorId, connectorTasks);
+                }
+                connectorTasks.add(CONNECTOR_TASK);
             }
             for (ConnectorTaskId taskId : taskIds) {
                 String connectorId = taskId.connector();
-                taskMap.computeIfAbsent(connectorId, key -> new ArrayList<>()).add(taskId.task());
+                Collection<Integer> connectorTasks = taskMap.get(connectorId);
+                if (connectorTasks == null) {
+                    connectorTasks = new ArrayList<>();
+                    taskMap.put(connectorId, connectorTasks);
+                }
+                connectorTasks.add(taskId.task());
             }
             return taskMap;
         }

@@ -19,7 +19,6 @@ package org.apache.kafka.streams.tests;
 
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KafkaStreams.State;
@@ -30,11 +29,11 @@ import org.apache.kafka.streams.kstream.Aggregator;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Initializer;
 import org.apache.kafka.streams.kstream.JoinWindows;
+import org.apache.kafka.streams.kstream.Joined;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.kstream.Reducer;
-import org.apache.kafka.streams.kstream.StreamJoined;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,8 +46,8 @@ import java.util.regex.Pattern;
 
 import static java.time.Duration.ofMillis;
 
-@SuppressWarnings("deprecation")
 public class StreamsOptimizedTest {
+
 
     public static void main(final String[] args) throws Exception {
         if (args.length < 1) {
@@ -102,7 +101,7 @@ public class StreamsOptimizedTest {
 
         mappedStream.join(countStream, (v1, v2) -> v1 + ":" + v2.toString(),
             JoinWindows.of(ofMillis(500)),
-            StreamJoined.with(Serdes.String(), Serdes.String(), Serdes.Long()))
+            Joined.with(Serdes.String(), Serdes.String(), Serdes.Long()))
             .peek((k, v) -> System.out.println(String.format("JOINED key=%s value=%s", k, v)))
             .to(joinTopic, Produced.with(Serdes.String(), Serdes.String()));
 
@@ -130,15 +129,17 @@ public class StreamsOptimizedTest {
             }
         });
 
-        streams.cleanUp();
         streams.start();
 
-        Exit.addShutdownHook("streams-shutdown-hook", () -> {
-            System.out.println("closing Kafka Streams instance");
-            System.out.flush();
-            streams.close(Duration.ofMillis(5000));
-            System.out.println("OPTIMIZE_TEST Streams Stopped");
-            System.out.flush();
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                System.out.println("closing Kafka Streams instance");
+                System.out.flush();
+                streams.close(Duration.ofMillis(5000));
+                System.out.println("OPTIMIZE_TEST Streams Stopped");
+                System.out.flush();
+            }
         });
 
     }

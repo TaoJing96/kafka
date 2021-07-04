@@ -26,16 +26,16 @@ class ChangeLoggingTimestampedWindowBytesStore extends ChangeLoggingWindowBytesS
 
     ChangeLoggingTimestampedWindowBytesStore(final WindowStore<Bytes, byte[]> bytesStore,
                                              final boolean retainDuplicates) {
-        super(bytesStore, retainDuplicates, WindowKeySchema::toStoreKeyBinary);
+        super(bytesStore, retainDuplicates);
     }
 
     @Override
     void log(final Bytes key,
              final byte[] valueAndTimestamp) {
         if (valueAndTimestamp != null) {
-            context.logChange(name(), key, rawValue(valueAndTimestamp), timestamp(valueAndTimestamp));
+            changeLogger.logChange(key, rawValue(valueAndTimestamp), timestamp(valueAndTimestamp));
         } else {
-            context.logChange(name(), key, null, context.timestamp());
+            changeLogger.logChange(key, null);
         }
     }
 }

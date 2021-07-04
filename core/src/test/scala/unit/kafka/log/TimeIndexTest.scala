@@ -21,8 +21,9 @@ import java.io.File
 
 import kafka.utils.TestUtils
 import org.apache.kafka.common.errors.InvalidOffsetException
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
-import org.junit.jupiter.api.Assertions.{assertEquals, assertThrows}
+import org.junit.{After, Before, Test}
+import org.junit.Assert.assertEquals
+import org.scalatest.Assertions.intercept
 
 /**
  * Unit test for time index.
@@ -32,19 +33,19 @@ class TimeIndexTest {
   val maxEntries = 30
   val baseOffset = 45L
 
-  @BeforeEach
-  def setup(): Unit = {
+  @Before
+  def setup() {
     this.idx = new TimeIndex(nonExistantTempFile(), baseOffset = baseOffset, maxIndexSize = maxEntries * 12)
   }
 
-  @AfterEach
-  def teardown(): Unit = {
+  @After
+  def teardown() {
     if(this.idx != null)
       this.idx.file.delete()
   }
 
   @Test
-  def testLookUp(): Unit = {
+  def testLookUp() {
     // Empty time index
     assertEquals(TimestampOffset(-1L, baseOffset), idx.lookup(100L))
 
@@ -68,13 +69,13 @@ class TimeIndexTest {
     assertEquals(TimestampOffset(40L, 85L), idx.entry(3))
   }
 
-  @Test
+  @Test(expected = classOf[IllegalArgumentException])
   def testEntryOverflow(): Unit = {
-    assertThrows(classOf[IllegalArgumentException], () => idx.entry(0))
+    idx.entry(0)
   }
 
   @Test
-  def testTruncate(): Unit = {
+  def testTruncate() {
     appendEntries(maxEntries - 1)
     idx.truncate()
     assertEquals(0, idx.entries)
@@ -85,14 +86,18 @@ class TimeIndexTest {
   }
 
   @Test
-  def testAppend(): Unit = {
+  def testAppend() {
     appendEntries(maxEntries - 1)
-    assertThrows(classOf[IllegalArgumentException], () => idx.maybeAppend(10000L, 1000L))
-    assertThrows(classOf[InvalidOffsetException], () => idx.maybeAppend(10000L, (maxEntries - 2) * 10, true))
+    intercept[IllegalArgumentException] {
+      idx.maybeAppend(10000L, 1000L)
+    }
+    intercept[InvalidOffsetException] {
+      idx.maybeAppend(10000L, (maxEntries - 2) * 10, true)
+    }
     idx.maybeAppend(10000L, 1000L, true)
   }
 
-  private def appendEntries(numEntries: Int): Unit = {
+  private def appendEntries(numEntries: Int) {
     for (i <- 1 to numEntries)
       idx.maybeAppend(i * 10, i * 10 + baseOffset)
   }
@@ -128,15 +133,15 @@ class TimeIndexTest {
     }
 
     shouldCorruptOffset = true
-    assertThrows(classOf[CorruptIndexException], () => idx.sanityCheck())
+    intercept[CorruptIndexException](idx.sanityCheck())
     shouldCorruptOffset = false
 
     shouldCorruptTimestamp = true
-    assertThrows(classOf[CorruptIndexException], () => idx.sanityCheck())
+    intercept[CorruptIndexException](idx.sanityCheck())
     shouldCorruptTimestamp = false
 
     shouldCorruptLength = true
-    assertThrows(classOf[CorruptIndexException], () => idx.sanityCheck())
+    intercept[CorruptIndexException](idx.sanityCheck())
     shouldCorruptLength = false
 
     idx.sanityCheck()

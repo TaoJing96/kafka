@@ -19,20 +19,21 @@ package org.apache.kafka.common.record;
 import org.apache.kafka.common.network.ByteBufferSend;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.LinkedList;
 import java.util.Queue;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class MultiRecordsSendTest {
 
     @Test
     public void testSendsFreedAfterWriting() throws IOException {
+        String dest = "1";
         int numChunks = 4;
         int chunkSize = 32;
         int totalSize = numChunks * chunkSize;
@@ -43,10 +44,10 @@ public class MultiRecordsSendTest {
         for (int i = 0; i < numChunks; i++) {
             ByteBuffer buffer = ByteBuffer.wrap(TestUtils.randomBytes(chunkSize));
             chunks[i] = buffer;
-            sends.add(new ByteBufferSend(buffer));
+            sends.add(new ByteBufferSend(dest, buffer));
         }
 
-        MultiRecordsSend send = new MultiRecordsSend(sends);
+        MultiRecordsSend send = new MultiRecordsSend(dest, sends);
         assertEquals(totalSize, send.size());
 
         for (int i = 0; i < numChunks; i++) {
@@ -68,7 +69,7 @@ public class MultiRecordsSendTest {
         }
 
         @Override
-        public long write(ByteBuffer[] srcs) {
+        public long write(ByteBuffer[] srcs) throws IOException {
             // Instead of overflowing, this channel refuses additional writes once the buffer is full,
             // which allows us to test the MultiRecordsSend behavior on a per-send basis.
             if (!buffer().hasRemaining())

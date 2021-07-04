@@ -32,13 +32,13 @@ trait Scheduler {
   /**
    * Initialize this scheduler so it is ready to accept scheduling of tasks
    */
-  def startup(): Unit
+  def startup()
   
   /**
    * Shutdown this scheduler. When this method is complete no more executions of background tasks will occur. 
    * This includes tasks scheduled with a delayed execution.
    */
-  def shutdown(): Unit
+  def shutdown()
   
   /**
    * Check if the scheduler has been started
@@ -72,7 +72,7 @@ class KafkaScheduler(val threads: Int,
   private var executor: ScheduledThreadPoolExecutor = null
   private val schedulerThreadId = new AtomicInteger(0)
 
-  override def startup(): Unit = {
+  override def startup() {
     debug("Initializing task scheduler.")
     this synchronized {
       if(isStarted)
@@ -81,12 +81,14 @@ class KafkaScheduler(val threads: Int,
       executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
       executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
       executor.setRemoveOnCancelPolicy(true)
-      executor.setThreadFactory(runnable =>
-        new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon))
+      executor.setThreadFactory(new ThreadFactory() {
+                                  def newThread(runnable: Runnable): Thread = 
+                                    new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon)
+                                })
     }
   }
   
-  override def shutdown(): Unit = {
+  override def shutdown() {
     debug("Shutting down task scheduler.")
     // We use the local variable to avoid NullPointerException if another thread shuts down scheduler at same time.
     val cachedExecutor = this.executor
@@ -108,7 +110,7 @@ class KafkaScheduler(val threads: Int,
         .format(name, TimeUnit.MILLISECONDS.convert(delay, unit), TimeUnit.MILLISECONDS.convert(period, unit)))
     this synchronized {
       ensureRunning()
-      val runnable: Runnable = () => {
+      val runnable = CoreUtils.runnable {
         try {
           trace("Beginning execution of scheduled task '%s'.".format(name))
           fun()
@@ -118,7 +120,7 @@ class KafkaScheduler(val threads: Int,
           trace("Completed execution of scheduled task '%s'.".format(name))
         }
       }
-      if (period >= 0)
+      if(period >= 0)
         executor.scheduleAtFixedRate(runnable, delay, period, unit)
       else
         executor.schedule(runnable, delay, unit)

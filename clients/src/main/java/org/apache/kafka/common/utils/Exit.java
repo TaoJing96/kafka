@@ -26,10 +26,6 @@ public class Exit {
         void execute(int statusCode, String message);
     }
 
-    public interface ShutdownHookAdder {
-        void addShutdownHook(String name, Runnable runnable);
-    }
-
     private static final Procedure DEFAULT_HALT_PROCEDURE = new Procedure() {
         @Override
         public void execute(int statusCode, String message) {
@@ -44,19 +40,8 @@ public class Exit {
         }
     };
 
-    private static final ShutdownHookAdder DEFAULT_SHUTDOWN_HOOK_ADDER = new ShutdownHookAdder() {
-        @Override
-        public void addShutdownHook(String name, Runnable runnable) {
-            if (name != null)
-                Runtime.getRuntime().addShutdownHook(KafkaThread.nonDaemon(name, runnable));
-            else
-                Runtime.getRuntime().addShutdownHook(new Thread(runnable));
-        }
-    };
-
     private volatile static Procedure exitProcedure = DEFAULT_EXIT_PROCEDURE;
     private volatile static Procedure haltProcedure = DEFAULT_HALT_PROCEDURE;
-    private volatile static ShutdownHookAdder shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
 
     public static void exit(int statusCode) {
         exit(statusCode, null);
@@ -74,20 +59,12 @@ public class Exit {
         haltProcedure.execute(statusCode, message);
     }
 
-    public static void addShutdownHook(String name, Runnable runnable) {
-        shutdownHookAdder.addShutdownHook(name, runnable);
-    }
-
     public static void setExitProcedure(Procedure procedure) {
         exitProcedure = procedure;
     }
 
     public static void setHaltProcedure(Procedure procedure) {
         haltProcedure = procedure;
-    }
-
-    public static void setShutdownHookAdder(ShutdownHookAdder shutdownHookAdder) {
-        Exit.shutdownHookAdder = shutdownHookAdder;
     }
 
     public static void resetExitProcedure() {
@@ -98,7 +75,4 @@ public class Exit {
         haltProcedure = DEFAULT_HALT_PROCEDURE;
     }
 
-    public static void resetShutdownHookAdder() {
-        shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
-    }
 }

@@ -20,10 +20,8 @@ import org.apache.kafka.common.MetricNameTemplate;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public class ConnectMetricsRegistry {
@@ -43,13 +41,6 @@ public class ConnectMetricsRegistry {
     public final MetricNameTemplate connectorType;
     public final MetricNameTemplate connectorClass;
     public final MetricNameTemplate connectorVersion;
-    public final MetricNameTemplate connectorTotalTaskCount;
-    public final MetricNameTemplate connectorRunningTaskCount;
-    public final MetricNameTemplate connectorPausedTaskCount;
-    public final MetricNameTemplate connectorFailedTaskCount;
-    public final MetricNameTemplate connectorUnassignedTaskCount;
-    public final MetricNameTemplate connectorDestroyedTaskCount;
-    public final MetricNameTemplate connectorRestartingTaskCount;
     public final MetricNameTemplate taskStatus;
     public final MetricNameTemplate taskRunningRatio;
     public final MetricNameTemplate taskPauseRatio;
@@ -96,7 +87,6 @@ public class ConnectMetricsRegistry {
     public final MetricNameTemplate taskStartupSuccessPercentage;
     public final MetricNameTemplate taskStartupFailureTotal;
     public final MetricNameTemplate taskStartupFailurePercentage;
-    public final MetricNameTemplate connectProtocol;
     public final MetricNameTemplate leaderName;
     public final MetricNameTemplate epoch;
     public final MetricNameTemplate rebalanceCompletedTotal;
@@ -113,10 +103,8 @@ public class ConnectMetricsRegistry {
     public final MetricNameTemplate dlqProduceFailures;
     public final MetricNameTemplate lastErrorTimestamp;
 
-    public Map<MetricNameTemplate, TaskStatus.State> connectorStatusMetrics;
-
     public ConnectMetricsRegistry() {
-        this(new LinkedHashSet<>());
+        this(new LinkedHashSet<String>());
     }
 
     public ConnectMetricsRegistry(Set<String> tags) {
@@ -300,39 +288,9 @@ public class ConnectMetricsRegistry {
         taskStartupFailurePercentage = createTemplate("task-startup-failure-percentage", WORKER_GROUP_NAME,
                                                       "The average percentage of this worker's tasks starts that failed.", workerTags);
 
-        Set<String> workerConnectorTags = new LinkedHashSet<>(tags);
-        workerConnectorTags.add(CONNECTOR_TAG_NAME);
-        connectorTotalTaskCount = createTemplate("connector-total-task-count", WORKER_GROUP_NAME,
-            "The number of tasks of the connector on the worker.", workerConnectorTags);
-        connectorRunningTaskCount = createTemplate("connector-running-task-count", WORKER_GROUP_NAME,
-            "The number of running tasks of the connector on the worker.", workerConnectorTags);
-        connectorPausedTaskCount = createTemplate("connector-paused-task-count", WORKER_GROUP_NAME,
-            "The number of paused tasks of the connector on the worker.", workerConnectorTags);
-        connectorFailedTaskCount = createTemplate("connector-failed-task-count", WORKER_GROUP_NAME,
-            "The number of failed tasks of the connector on the worker.", workerConnectorTags);
-        connectorUnassignedTaskCount = createTemplate("connector-unassigned-task-count",
-            WORKER_GROUP_NAME,
-            "The number of unassigned tasks of the connector on the worker.", workerConnectorTags);
-        connectorDestroyedTaskCount = createTemplate("connector-destroyed-task-count",
-            WORKER_GROUP_NAME,
-            "The number of destroyed tasks of the connector on the worker.", workerConnectorTags);
-        connectorRestartingTaskCount = createTemplate("connector-restarting-task-count",
-            WORKER_GROUP_NAME,
-            "The number of restarting tasks of the connector on the worker.", workerConnectorTags);
-
-        connectorStatusMetrics = new HashMap<>();
-        connectorStatusMetrics.put(connectorRunningTaskCount, TaskStatus.State.RUNNING);
-        connectorStatusMetrics.put(connectorPausedTaskCount, TaskStatus.State.PAUSED);
-        connectorStatusMetrics.put(connectorFailedTaskCount, TaskStatus.State.FAILED);
-        connectorStatusMetrics.put(connectorUnassignedTaskCount, TaskStatus.State.UNASSIGNED);
-        connectorStatusMetrics.put(connectorDestroyedTaskCount, TaskStatus.State.DESTROYED);
-        connectorStatusMetrics.put(connectorRestartingTaskCount, TaskStatus.State.RESTARTING);
-        connectorStatusMetrics = Collections.unmodifiableMap(connectorStatusMetrics);
-
         /***** Worker rebalance level *****/
         Set<String> rebalanceTags = new LinkedHashSet<>(tags);
 
-        connectProtocol = createTemplate("connect-protocol", WORKER_REBALANCE_GROUP_NAME, "The Connect protocol used by this cluster", rebalanceTags);
         leaderName = createTemplate("leader-name", WORKER_REBALANCE_GROUP_NAME, "The name of the group leader.", rebalanceTags);
         epoch = createTemplate("epoch", WORKER_REBALANCE_GROUP_NAME, "The epoch or generation number of this worker.", rebalanceTags);
         rebalanceCompletedTotal = createTemplate("completed-rebalances-total", WORKER_REBALANCE_GROUP_NAME,

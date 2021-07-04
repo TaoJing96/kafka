@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 
 public class SystemTestUtilTest {
 
@@ -46,21 +45,21 @@ public class SystemTestUtilTest {
         assertEquals(sortedParsedMap, expectedParsedMap);
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void shouldThrowExceptionOnNull() {
-        assertThrows(NullPointerException.class, () -> SystemTestUtil.parseConfigs(null));
+        SystemTestUtil.parseConfigs(null);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void shouldThrowExceptionIfNotCorrectKeyValueSeparator() {
         final String badString = "foo:bar,baz:boo";
-        assertThrows(IllegalStateException.class, () -> SystemTestUtil.parseConfigs(badString));
+        SystemTestUtil.parseConfigs(badString);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void shouldThrowExceptionIfNotCorrectKeyValuePairSeparator() {
         final String badString = "foo=bar;baz=boo";
-        assertThrows(IllegalStateException.class, () -> SystemTestUtil.parseConfigs(badString));
+        SystemTestUtil.parseConfigs(badString);
     }
 
     @Test

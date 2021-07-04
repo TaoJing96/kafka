@@ -18,28 +18,19 @@
 package kafka.api
 
 import java.io.File
-import java.util
 import java.util.Properties
-
 import javax.security.auth.login.Configuration
 
-import scala.collection.Seq
+import kafka.admin.ConfigCommand
 import kafka.security.minikdc.MiniKdc
-import kafka.server.{ConfigType, KafkaConfig}
+import kafka.server.KafkaConfig
 import kafka.utils.JaasTestUtils.{JaasSection, Krb5LoginModule, ZkDigestModule}
 import kafka.utils.{JaasTestUtils, TestUtils}
-import kafka.zk.{AdminZkClient, KafkaZkClient}
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, ScramCredentialInfo, UserScramCredentialAlteration, UserScramCredentialUpsertion, ScramMechanism => PublicScramMechanism}
 import org.apache.kafka.common.config.SaslConfigs
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.security.JaasUtils
-import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.security.authenticator.LoginManager
-import org.apache.kafka.common.security.scram.internals.{ScramCredentialUtils, ScramFormatter, ScramMechanism}
-import org.apache.kafka.common.utils.Time
-import org.apache.zookeeper.client.ZKClientConfig
-
-import scala.jdk.CollectionConverters._
+import org.apache.kafka.common.security.scram.internals.ScramMechanism
 
 /*
  * Implements an enumeration for the modes enabled here:
@@ -60,7 +51,7 @@ trait SaslSetup {
   private var serverKeytabFile: Option[File] = None
   private var clientKeytabFile: Option[File] = None
 
-  def startSasl(jaasSections: Seq[JaasSection]): Unit = {
+  def startSasl(jaasSections: Seq[JaasSection]) {
     // Important if tests leak consumers, producers or brokers
     LoginManager.closeAll()
     val hasKerberos = jaasSections.exists(_.modules.exists {
@@ -97,7 +88,7 @@ trait SaslSetup {
     (serverKeytabFile.get, clientKeytabFile.get)
   }
 
-  def jaasSections(kafkaServerSaslMechanisms: Seq[String],
+  protected def jaasSections(kafkaServerSaslMechanisms: Seq[String],
                              kafkaClientSaslMechanism: Option[String],
                              mode: SaslSetupMode = Both,
                              kafkaServerEntryName: String = JaasTestUtils.KafkaServerContextName): Seq[JaasSection] = {
@@ -115,14 +106,14 @@ trait SaslSetup {
     }
   }
 
-  private def writeJaasConfigurationToFile(jaasSections: Seq[JaasSection]): Unit = {
+  private def writeJaasConfigurationToFile(jaasSections: Seq[JaasSection]) {
     val file = JaasTestUtils.writeJaasContextsToFile(jaasSections)
     System.setProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM, file.getAbsolutePath)
     // This will cause a reload of the Configuration singleton when `getConfiguration` is called
     Configuration.setConfiguration(null)
   }
 
-  def closeSasl(): Unit = {
+  def closeSasl() {
     if (kdc != null)
       kdc.stop()
     // Important if tests leak consumers, producers or brokers
@@ -154,62 +145,13 @@ trait SaslSetup {
       JaasTestUtils.clientLoginModule(clientSaslMechanism, clientKeytabFile)
   }
 
-  def jaasScramClientLoginModule(clientSaslScramMechanism: String, scramUser: String, scramPassword: String): String = {
-    JaasTestUtils.scramClientLoginModule(clientSaslScramMechanism, scramUser, scramPassword)
-  }
-
-  def createPrivilegedAdminClient(): Admin = {
-    // create an admin client instance that is authorized to create credentials
-    throw new UnsupportedOperationException("Must implement this if a test needs to use it")
-  }
-
-  def createAdminClient(brokerList: String, securityProtocol: SecurityProtocol, trustStoreFile: Option[File],
-                        clientSaslProperties: Option[Properties], scramMechanism: String, user: String, password: String) : Admin = {
-    val config = new util.HashMap[String, Object]
-    config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
-    val securityProps: util.Map[Object, Object] =
-      TestUtils.adminClientSecurityConfigs(securityProtocol, trustStoreFile, clientSaslProperties)
-    securityProps.forEach { (key, value) => config.put(key.asInstanceOf[String], value) }
-    config.put(SaslConfigs.SASL_JAAS_CONFIG, jaasScramClientLoginModule(scramMechanism, user, password))
-    Admin.create(config)
-  }
-
-  def createScramCredentialsViaPrivilegedAdminClient(userName: String, password: String): Unit = {
-    val privilegedAdminClient = createPrivilegedAdminClient() // must explicitly implement this method
-    try {
-      // create the SCRAM credential for the given user
-      createScramCredentials(privilegedAdminClient, userName, password)
-    } finally {
-      privilegedAdminClient.close()
-    }
-  }
-
-    def createScramCredentials(adminClient: Admin, userName: String, password: String): Unit = {
-    val results = adminClient.alterUserScramCredentials(PublicScramMechanism.values().filter(_ != PublicScramMechanism.UNKNOWN).map(mechanism =>
-      new UserScramCredentialUpsertion(userName, new ScramCredentialInfo(mechanism, 4096), password)
-        .asInstanceOf[UserScramCredentialAlteration]).toList.asJava)
-    results.all.get
-  }
-
   def createScramCredentials(zkConnect: String, userName: String, password: String): Unit = {
-    val zkClientConfig = new ZKClientConfig()
-    val zkClient = KafkaZkClient(
-      zkConnect, JaasUtils.isZkSaslEnabled || KafkaConfig.zkTlsClientAuthEnabled(zkClientConfig), 30000, 30000,
-      Int.MaxValue, Time.SYSTEM, zkClientConfig = Some(zkClientConfig))
-    val adminZkClient = new AdminZkClient(zkClient)
-
-    val entityType = ConfigType.User
-    val entityName = userName
-    val configs = adminZkClient.fetchEntityConfig(entityType, entityName)
-
-    ScramMechanism.values().foreach(mechanism => {
-      val credential = new ScramFormatter(mechanism).generateCredential(password, 4096)
-      val credentialString = ScramCredentialUtils.credentialToString(credential)
-      configs.setProperty(mechanism.mechanismName, credentialString)
-    })
-
-    adminZkClient.changeConfigs(entityType, entityName, configs)
-    zkClient.close()
+    val credentials = ScramMechanism.values.map(m => s"${m.mechanismName}=[iterations=4096,password=$password]")
+    val args = Array("--zookeeper", zkConnect,
+      "--alter", "--add-config", credentials.mkString(","),
+      "--entity-type", "users",
+      "--entity-name", userName)
+    ConfigCommand.main(args)
   }
 
 }

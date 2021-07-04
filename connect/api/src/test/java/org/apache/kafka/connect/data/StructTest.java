@@ -17,8 +17,7 @@
 package org.apache.kafka.connect.data;
 
 import org.apache.kafka.connect.errors.DataException;
-
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -26,10 +25,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 
 
 public class StructTest {
@@ -115,43 +114,38 @@ public class StructTest {
     // tests in SchemaTest. These are meant to ensure that we are invoking the same code path and that we do deeper
     // inspection than just checking the class of the object
 
-    @Test
+    @Test(expected = DataException.class)
     public void testInvalidFieldType() {
-        assertThrows(DataException.class,
-            () -> new Struct(FLAT_STRUCT_SCHEMA).put("int8", "should fail because this is a string, not int8"));
+        new Struct(FLAT_STRUCT_SCHEMA).put("int8", "should fail because this is a string, not int8");
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testInvalidArrayFieldElements() {
-        assertThrows(DataException.class,
-            () -> new Struct(NESTED_SCHEMA).put("array", Collections.singletonList("should fail since elements should be int8s")));
+        new Struct(NESTED_SCHEMA).put("array", Arrays.asList("should fail since elements should be int8s"));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testInvalidMapKeyElements() {
-        assertThrows(DataException.class,
-            () -> new Struct(NESTED_SCHEMA).put("map", Collections.singletonMap("should fail because keys should be int8s", (byte) 12)));
+        new Struct(NESTED_SCHEMA).put("map", Collections.singletonMap("should fail because keys should be int8s", (byte) 12));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testInvalidStructFieldSchema() {
-        assertThrows(DataException.class,
-            () -> new Struct(NESTED_SCHEMA).put("nested", new Struct(MAP_SCHEMA)));
+        new Struct(NESTED_SCHEMA).put("nested", new Struct(MAP_SCHEMA));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testInvalidStructFieldValue() {
-        assertThrows(DataException.class,
-            () -> new Struct(NESTED_SCHEMA).put("nested", new Struct(NESTED_CHILD_SCHEMA)));
+        new Struct(NESTED_SCHEMA).put("nested", new Struct(NESTED_CHILD_SCHEMA));
     }
 
 
-    @Test
+    @Test(expected = DataException.class)
     public void testMissingFieldValidation() {
         // Required int8 field
         Schema schema = SchemaBuilder.struct().field("field", REQUIRED_FIELD_SCHEMA).build();
         Struct struct = new Struct(schema);
-        assertThrows(DataException.class, struct::validate);
+        struct.validate();
     }
 
     @Test

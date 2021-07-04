@@ -16,18 +16,16 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.InvalidRecordException;
 import org.apache.kafka.common.record.AbstractLegacyRecordBatch.ByteBufferLegacyRecordBatch;
 import org.apache.kafka.common.utils.Utils;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class AbstractLegacyRecordBatchTest {
 
@@ -86,7 +84,7 @@ public class AbstractLegacyRecordBatchTest {
         }
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidWrapperOffsetV1() {
         SimpleRecord[] simpleRecords = new SimpleRecord[] {
             new SimpleRecord(1L, "a".getBytes(), "1".getBytes()),
@@ -100,10 +98,10 @@ public class AbstractLegacyRecordBatchTest {
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
         batch.setLastOffset(1L);
 
-        assertThrows(InvalidRecordException.class, batch::iterator);
+        batch.iterator();
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testSetNoTimestampTypeNotAllowed() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V1, 0L,
                 CompressionType.GZIP, TimestampType.CREATE_TIME,
@@ -111,10 +109,10 @@ public class AbstractLegacyRecordBatchTest {
                 new SimpleRecord(2L, "b".getBytes(), "2".getBytes()),
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
-        assertThrows(IllegalArgumentException.class, () -> batch.setMaxTimestamp(TimestampType.NO_TIMESTAMP_TYPE, RecordBatch.NO_TIMESTAMP));
+        batch.setMaxTimestamp(TimestampType.NO_TIMESTAMP_TYPE, RecordBatch.NO_TIMESTAMP);
     }
 
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void testSetLogAppendTimeNotAllowedV0() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V0, 0L,
                 CompressionType.GZIP, TimestampType.CREATE_TIME,
@@ -123,10 +121,10 @@ public class AbstractLegacyRecordBatchTest {
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         long logAppendTime = 15L;
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
-        assertThrows(UnsupportedOperationException.class, () -> batch.setMaxTimestamp(TimestampType.LOG_APPEND_TIME, logAppendTime));
+        batch.setMaxTimestamp(TimestampType.LOG_APPEND_TIME, logAppendTime);
     }
 
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void testSetCreateTimeNotAllowedV0() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V0, 0L,
                 CompressionType.GZIP, TimestampType.CREATE_TIME,
@@ -135,10 +133,10 @@ public class AbstractLegacyRecordBatchTest {
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         long createTime = 15L;
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
-        assertThrows(UnsupportedOperationException.class, () -> batch.setMaxTimestamp(TimestampType.CREATE_TIME, createTime));
+        batch.setMaxTimestamp(TimestampType.CREATE_TIME, createTime);
     }
 
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void testSetPartitionLeaderEpochNotAllowedV0() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V0, 0L,
                 CompressionType.GZIP, TimestampType.CREATE_TIME,
@@ -146,10 +144,10 @@ public class AbstractLegacyRecordBatchTest {
                 new SimpleRecord(2L, "b".getBytes(), "2".getBytes()),
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
-        assertThrows(UnsupportedOperationException.class, () -> batch.setPartitionLeaderEpoch(15));
+        batch.setPartitionLeaderEpoch(15);
     }
 
-    @Test
+    @Test(expected = UnsupportedOperationException.class)
     public void testSetPartitionLeaderEpochNotAllowedV1() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V1, 0L,
                 CompressionType.GZIP, TimestampType.CREATE_TIME,
@@ -157,7 +155,7 @@ public class AbstractLegacyRecordBatchTest {
                 new SimpleRecord(2L, "b".getBytes(), "2".getBytes()),
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         ByteBufferLegacyRecordBatch batch = new ByteBufferLegacyRecordBatch(records.buffer());
-        assertThrows(UnsupportedOperationException.class, () -> batch.setPartitionLeaderEpoch(15));
+        batch.setPartitionLeaderEpoch(15);
     }
 
     @Test

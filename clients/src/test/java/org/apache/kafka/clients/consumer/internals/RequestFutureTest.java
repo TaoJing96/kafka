@@ -16,14 +16,13 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class RequestFutureTest {
 
@@ -53,52 +52,52 @@ public class RequestFutureTest {
         assertNull(future.value());
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testRuntimeExceptionInComplete() {
         RequestFuture<Exception> future = new RequestFuture<>();
-        assertThrows(IllegalArgumentException.class, () -> future.complete(new RuntimeException()));
+        future.complete(new RuntimeException());
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeCompleteAfterAlreadyComplete() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.complete(null);
-        assertThrows(IllegalStateException.class, () -> future.complete(null));
+        future.complete(null);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeCompleteAfterAlreadyFailed() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.raise(new RuntimeException());
-        assertThrows(IllegalStateException.class, () -> future.complete(null));
+        future.complete(null);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeRaiseAfterAlreadyFailed() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.raise(new RuntimeException());
-        assertThrows(IllegalStateException.class, () -> future.raise(new RuntimeException()));
+        future.raise(new RuntimeException());
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeRaiseAfterAlreadyCompleted() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.complete(null);
-        assertThrows(IllegalStateException.class, () -> future.raise(new RuntimeException()));
+        future.raise(new RuntimeException());
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeExceptionAfterSuccess() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.complete(null);
-        assertThrows(IllegalStateException.class, future::exception);
+        future.exception();
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void invokeValueAfterFailure() {
         RequestFuture<Void> future = new RequestFuture<>();
         future.raise(new RuntimeException());
-        assertThrows(IllegalStateException.class, future::value);
+        future.value();
     }
 
     @Test

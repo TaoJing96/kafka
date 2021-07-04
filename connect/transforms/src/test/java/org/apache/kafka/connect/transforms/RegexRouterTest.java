@@ -17,12 +17,12 @@
 package org.apache.kafka.connect.transforms;
 
 import org.apache.kafka.connect.sink.SinkRecord;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.Assert.assertEquals;
 
 public class RegexRouterTest {
 

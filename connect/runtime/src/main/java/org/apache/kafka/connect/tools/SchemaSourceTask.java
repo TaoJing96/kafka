@@ -26,6 +26,7 @@ import org.apache.kafka.tools.ThroughputThrottler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -153,12 +154,13 @@ public class SchemaSourceTask extends SourceTask {
             }
 
             System.out.println("{\"task\": " + id + ", \"seqno\": " + seqno + "}");
+            List<SourceRecord> result = Collections.singletonList(srcRecord);
             seqno++;
             count++;
-            return Collections.singletonList(srcRecord);
+            return result;
         } else {
             throttler.throttle();
-            return Collections.emptyList();
+            return new ArrayList<>();
         }
     }
 

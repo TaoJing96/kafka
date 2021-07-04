@@ -19,7 +19,6 @@ package org.apache.kafka.common.serialization;
 import org.apache.kafka.common.errors.SerializationException;
 
 import java.io.UnsupportedEncodingException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -27,7 +26,7 @@ import java.util.Map;
  *  value.serializer.encoding or serializer.encoding. The first two take precedence over the last.
  */
 public class StringSerializer implements Serializer<String> {
-    private String encoding = StandardCharsets.UTF_8.name();
+    private String encoding = "UTF8";
 
     @Override
     public void configure(Map<String, ?> configs, boolean isKey) {

@@ -30,7 +30,7 @@ import java.util.Objects;
 public class WindowedChangelogTopicConfig extends InternalTopicConfig {
     private static final Map<String, String> WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES;
     static {
-        final Map<String, String> tempTopicDefaultOverrides = new HashMap<>(INTERNAL_TOPIC_DEFAULT_OVERRIDES);
+        final Map<String, String> tempTopicDefaultOverrides = new HashMap<>();
         tempTopicDefaultOverrides.put(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_COMPACT + "," + TopicConfig.CLEANUP_POLICY_DELETE);
         WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES = Collections.unmodifiableMap(tempTopicDefaultOverrides);
     }
@@ -48,7 +48,6 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
      * @param additionalRetentionMs - added to retention to allow for clock drift etc
      * @return Properties to be used when creating the topic
      */
-    @Override
     public Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs) {
         // internal topic config overridden rule: library overrides < global config overrides < per-topic config overrides
         final Map<String, String> topicConfig = new HashMap<>(WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES);
@@ -86,14 +85,13 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
         }
         final WindowedChangelogTopicConfig that = (WindowedChangelogTopicConfig) o;
         return Objects.equals(name, that.name) &&
-               Objects.equals(topicConfigs, that.topicConfigs) &&
-               Objects.equals(retentionMs, that.retentionMs) &&
-               Objects.equals(enforceNumberOfPartitions, that.enforceNumberOfPartitions);
+                Objects.equals(topicConfigs, that.topicConfigs) &&
+                Objects.equals(retentionMs, that.retentionMs);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, topicConfigs, retentionMs, enforceNumberOfPartitions);
+        return Objects.hash(name, topicConfigs, retentionMs);
     }
 
     @Override
@@ -102,7 +100,6 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
                 "name=" + name +
                 ", topicConfigs=" + topicConfigs +
                 ", retentionMs=" + retentionMs +
-                ", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
                 ")";
     }
 }

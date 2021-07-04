@@ -68,11 +68,5 @@ public class TaskStatus extends AbstractStatus<ConnectorTaskId> {
          * @param id The id of the task
          */
         void onDeletion(ConnectorTaskId id);
-
-        /**
-         * Invoked when the task is restarted asynchronously by the herder on processing a restart request.
-         * @param id The id of the task
-         */
-        void onRestart(ConnectorTaskId id);
     }
 }

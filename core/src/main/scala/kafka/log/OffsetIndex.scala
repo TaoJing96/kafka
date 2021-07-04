@@ -138,7 +138,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
    * Append an entry for the given offset/location pair to the index. This entry must have a larger offset than all subsequent entries.
    * @throws IndexOffsetOverflowException if the offset causes index offset to overflow
    */
-  def append(offset: Long, position: Int): Unit = {
+  def append(offset: Long, position: Int) {
     inLock(lock) {
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
@@ -147,7 +147,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset
-        require(_entries * entrySize == mmap.position(), s"$entries entries but file position in index is ${mmap.position()}.")
+        require(_entries * entrySize == mmap.position(), entries + " entries but file position in index is " + mmap.position() + ".")
       } else {
         throw new InvalidOffsetException(s"Attempt to append an offset ($offset) to position $entries no larger than" +
           s" the last offset appended (${_lastOffset}) to ${file.getAbsolutePath}.")
@@ -157,7 +157,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
 
   override def truncate() = truncateToEntries(0)
 
-  override def truncateTo(offset: Long): Unit = {
+  override def truncateTo(offset: Long) {
     inLock(lock) {
       val idx = mmap.duplicate
       val slot = largestLowerBoundSlotFor(idx, offset, IndexSearchType.KEY)
@@ -181,7 +181,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
   /**
    * Truncates index to a known number of entries.
    */
-  private def truncateToEntries(entries: Int): Unit = {
+  private def truncateToEntries(entries: Int) {
     inLock(lock) {
       _entries = entries
       mmap.position(_entries * entrySize)
@@ -191,7 +191,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     }
   }
 
-  override def sanityCheck(): Unit = {
+  override def sanityCheck() {
     if (_entries != 0 && _lastOffset < baseOffset)
       throw new CorruptIndexException(s"Corrupt index found, index file (${file.getAbsolutePath}) has non-zero size " +
         s"but the last offset is ${_lastOffset} which is less than the base offset $baseOffset.")

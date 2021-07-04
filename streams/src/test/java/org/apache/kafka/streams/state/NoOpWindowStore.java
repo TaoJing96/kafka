@@ -45,6 +45,10 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
         public KeyValue<Long, KeyValue> next() {
             throw new NoSuchElementException();
         }
+
+        @Override
+        public void remove() {
+        }
     }
 
     private static final WindowStoreIterator<KeyValue> EMPTY_WINDOW_STORE_ITERATOR = new EmptyWindowStoreIterator();
@@ -54,7 +58,6 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
         return "";
     }
 
-    @Deprecated
     @Override
     public void init(final ProcessorContext context, final StateStore root) {
 
@@ -86,30 +89,27 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
     }
 
     @Override
-    public WindowStoreIterator fetch(final Object key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+    @SuppressWarnings("deprecation")
+    public WindowStoreIterator fetch(final Object key, final long timeFrom, final long timeTo) {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 
     @Override
-    public WindowStoreIterator backwardFetch(final  Object key,
-                                             final Instant timeFrom,
-                                             final Instant timeTo) throws IllegalArgumentException {
+    public WindowStoreIterator fetch(final Object key, final Instant from, final Instant to) {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 
     @Override
-    public KeyValueIterator fetch(final Object keyFrom,
-                                  final Object keyTo,
-                                  final Instant timeFrom,
-                                  final Instant timeTo) throws IllegalArgumentException {
+    @SuppressWarnings("deprecation")
+    public WindowStoreIterator<KeyValue> fetch(final Object from, final Object to, final long timeFrom, final long timeTo) {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 
     @Override
-    public KeyValueIterator backwardFetch(final Object from,
-                                          final Object keyTo,
-                                          final Instant timeFrom,
-                                          final Instant timeTo) throws IllegalArgumentException {
+    public KeyValueIterator fetch(final Object from,
+                                  final Object to,
+                                  final Instant fromTime,
+                                  final Instant toTime) throws IllegalArgumentException {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 
@@ -117,20 +117,15 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
     public WindowStoreIterator<KeyValue> all() {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
-
+    
     @Override
-    public WindowStoreIterator<KeyValue> backwardAll() {
+    @SuppressWarnings("deprecation")
+    public WindowStoreIterator<KeyValue> fetchAll(final long timeFrom, final long timeTo) {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 
     @Override
-    public KeyValueIterator fetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
-        return EMPTY_WINDOW_STORE_ITERATOR;
-    }
-
-    @Override
-    public KeyValueIterator backwardFetchAll(final Instant timeFrom,
-                                             final Instant timeTo) throws IllegalArgumentException {
+    public KeyValueIterator fetchAll(final Instant from, final Instant to) {
         return EMPTY_WINDOW_STORE_ITERATOR;
     }
 }

@@ -23,13 +23,12 @@ import java.util.Properties
 import kafka.common.AdminCommandFailedException
 import kafka.utils.json.JsonValue
 import kafka.utils.{CommandDefaultOptions, CommandLineUtils, CoreUtils, Json}
-import org.apache.kafka.clients.admin.{Admin, RecordsToDelete}
-import org.apache.kafka.clients.CommonClientConfigs
+import org.apache.kafka.clients.admin.RecordsToDelete
+import org.apache.kafka.clients.{CommonClientConfigs, admin}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.utils.Utils
 
-import scala.jdk.CollectionConverters._
-import scala.collection.Seq
+import scala.collection.JavaConverters._
 
 /**
  * A command for delete records of the given partitions down to the specified offset.
@@ -90,23 +89,23 @@ object DeleteRecordsCommand {
     val deleteRecordsResult = adminClient.deleteRecords(recordsToDelete)
     out.println("Records delete operation completed:")
 
-    deleteRecordsResult.lowWatermarks.forEach { (tp, partitionResult) =>
+    deleteRecordsResult.lowWatermarks.asScala.foreach { case (tp, partitionResult) => {
       try out.println(s"partition: $tp\tlow_watermark: ${partitionResult.get.lowWatermark}")
       catch {
         case e: Exception => out.println(s"partition: $tp\terror: ${e.getMessage}")
       }
-    }
+    }}
 
     adminClient.close()
   }
 
-  private def createAdminClient(opts: DeleteRecordsCommandOptions): Admin = {
+  private def createAdminClient(opts: DeleteRecordsCommandOptions): admin.AdminClient = {
     val props = if (opts.options.has(opts.commandConfigOpt))
       Utils.loadProps(opts.options.valueOf(opts.commandConfigOpt))
     else
       new Properties()
     props.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, opts.options.valueOf(opts.bootstrapServerOpt))
-    Admin.create(props)
+    admin.AdminClient.create(props)
   }
 
   class DeleteRecordsCommandOptions(args: Array[String]) extends CommandDefaultOptions(args) {

@@ -27,6 +27,7 @@ public class PartitionInfo {
     private final Node[] inSyncReplicas;
     private final Node[] offlineReplicas;
 
+    // Used only by tests
     public PartitionInfo(String topic, int partition, Node leader, Node[] replicas, Node[] inSyncReplicas) {
         this(topic, partition, leader, replicas, inSyncReplicas, new Node[0]);
     }
@@ -112,4 +113,5 @@ public class PartitionInfo {
         b.append("]");
         return b.toString();
     }
+
 }

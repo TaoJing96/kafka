@@ -17,23 +17,20 @@
 package org.apache.kafka.connect.transforms.util;
 
 import org.apache.kafka.common.config.ConfigException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
 public class NonEmptyListValidatorTest {
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testNullList() {
-        assertThrows(ConfigException.class, () -> new NonEmptyListValidator().ensureValid("foo", null));
+        new NonEmptyListValidator().ensureValid("foo", null);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testEmptyList() {
-        assertThrows(ConfigException.class,
-            () -> new NonEmptyListValidator().ensureValid("foo", Collections.emptyList()));
+        new NonEmptyListValidator().ensureValid("foo", Collections.emptyList());
     }
 
     @Test

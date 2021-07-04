@@ -17,11 +17,10 @@
 package kafka.api
 
 import kafka.utils.JaasTestUtils
-import org.apache.kafka.common.security.auth.KafkaPrincipal
 
 class SaslOAuthBearerSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizationTest {
   override protected def kafkaClientSaslMechanism = "OAUTHBEARER"
   override protected def kafkaServerSaslMechanisms = List(kafkaClientSaslMechanism)
-  override val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KafkaOAuthBearerUser)
-  override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KafkaOAuthBearerAdmin)
+  override val clientPrincipal = JaasTestUtils.KafkaOAuthBearerUser
+  override val kafkaPrincipal = JaasTestUtils.KafkaOAuthBearerAdmin
 }

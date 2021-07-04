@@ -18,13 +18,12 @@ package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnsupportedCompressionTypeException;
-import org.apache.kafka.common.network.TransferableChannel;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.GatheringByteChannel;
 import java.util.Iterator;
 
 /**
@@ -40,8 +39,8 @@ public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownCon
     private RecordsSend convertedRecordsWriter;
     private Iterator<ConvertedRecords<?>> convertedRecordsIterator;
 
-    public LazyDownConversionRecordsSend(LazyDownConversionRecords records) {
-        super(records, records.sizeInBytes());
+    public LazyDownConversionRecordsSend(String destination, LazyDownConversionRecords records) {
+        super(destination, records, records.sizeInBytes());
         convertedRecordsWriter = null;
         recordConversionStats = new RecordConversionStats();
         convertedRecordsIterator = records().iterator(MAX_READ_SIZE);
@@ -67,7 +66,7 @@ public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownCon
     }
 
     @Override
-    public long writeTo(TransferableChannel channel, long previouslyWritten, int remaining) throws IOException {
+    public long writeTo(GatheringByteChannel channel, long previouslyWritten, int remaining) throws IOException {
         if (convertedRecordsWriter == null || convertedRecordsWriter.completed()) {
             MemoryRecords convertedRecords;
 
@@ -91,7 +90,7 @@ public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownCon
                 convertedRecords = buildOverflowBatch(remaining);
             }
 
-            convertedRecordsWriter = new DefaultRecordsSend<>(convertedRecords, Math.min(convertedRecords.sizeInBytes(), remaining));
+            convertedRecordsWriter = new DefaultRecordsSend(destination(), convertedRecords, Math.min(convertedRecords.sizeInBytes(), remaining));
         }
         return convertedRecordsWriter.writeTo(channel);
     }

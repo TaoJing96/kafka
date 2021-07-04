@@ -16,8 +16,6 @@
  */
 package org.apache.kafka.connect.storage;
 
-import org.apache.kafka.connect.runtime.RestartRequest;
-import org.apache.kafka.connect.runtime.SessionKey;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.WorkerConfigTransformer;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
@@ -70,12 +68,11 @@ public class MemoryConfigBackingStore implements ConfigBackingStore {
 
         return new ClusterConfigState(
                 ClusterConfigState.NO_OFFSET,
-                null,
                 connectorTaskCounts,
                 connectorConfigs,
                 connectorTargetStates,
                 taskConfigs,
-                Collections.emptySet(),
+                Collections.<String>emptySet(),
                 configTransformer);
     }
 
@@ -144,16 +141,6 @@ public class MemoryConfigBackingStore implements ConfigBackingStore {
 
         if (updateListener != null)
             updateListener.onConnectorTargetStateChange(connector);
-    }
-
-    @Override
-    public void putSessionKey(SessionKey sessionKey) {
-        // no-op
-    }
-
-    @Override
-    public void putRestartRequest(RestartRequest restartRequest) {
-        // no-op
     }
 
     @Override

@@ -17,9 +17,10 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.DeleteTopicsResponseData;
+import org.apache.kafka.common.message.DeleteTopicsResponseData.DeletableTopicResult;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -38,11 +39,19 @@ public class DeleteTopicsResponse extends AbstractResponse {
      * INVALID_REQUEST(42)
      * TOPIC_DELETION_DISABLED(73)
      */
-    private final DeleteTopicsResponseData data;
+    private DeleteTopicsResponseData data;
 
     public DeleteTopicsResponse(DeleteTopicsResponseData data) {
-        super(ApiKeys.DELETE_TOPICS);
         this.data = data;
+    }
+
+    public DeleteTopicsResponse(Struct struct, short version) {
+        this.data = new DeleteTopicsResponseData(struct, version);
+    }
+
+    @Override
+    protected Struct toStruct(short version) {
+        return data.toStruct(version);
     }
 
     @Override
@@ -50,7 +59,6 @@ public class DeleteTopicsResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
-    @Override
     public DeleteTopicsResponseData data() {
         return data;
     }
@@ -58,14 +66,15 @@ public class DeleteTopicsResponse extends AbstractResponse {
     @Override
     public Map<Errors, Integer> errorCounts() {
         HashMap<Errors, Integer> counts = new HashMap<>();
-        data.responses().forEach(result ->
-            updateErrorCounts(counts, Errors.forCode(result.errorCode()))
-        );
+        for (DeletableTopicResult result : data.responses()) {
+            Errors error = Errors.forCode(result.errorCode());
+            counts.put(error, counts.getOrDefault(error, 0) + 1);
+        }
         return counts;
     }
 
     public static DeleteTopicsResponse parse(ByteBuffer buffer, short version) {
-        return new DeleteTopicsResponse(new DeleteTopicsResponseData(new ByteBufferAccessor(buffer), version));
+        return new DeleteTopicsResponse(ApiKeys.DELETE_TOPICS.parseResponse(version, buffer), version);
     }
 
     @Override

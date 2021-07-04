@@ -16,9 +16,19 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.protocol.ApiMessage;
+import org.apache.kafka.common.protocol.types.Struct;
 
-public interface AbstractRequestResponse {
+import java.nio.ByteBuffer;
 
-    ApiMessage data();
+public abstract class AbstractRequestResponse {
+    /**
+     * Visible for testing.
+     */
+    public static ByteBuffer serialize(Struct headerStruct, Struct bodyStruct) {
+        ByteBuffer buffer = ByteBuffer.allocate(headerStruct.sizeOf() + bodyStruct.sizeOf());
+        headerStruct.writeTo(buffer);
+        bodyStruct.writeTo(buffer);
+        buffer.rewind();
+        return buffer;
+    }
 }

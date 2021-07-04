@@ -16,12 +16,10 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.InvalidRecordException;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.AbstractIterator;
-import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.CloseableIterator;
@@ -110,6 +108,11 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
     @Override
     public boolean hasTimestampType(TimestampType timestampType) {
         return outerRecord().timestampType() == timestampType;
+    }
+
+    @Override
+    public Long checksumOrNull() {
+        return checksum();
     }
 
     @Override
@@ -224,7 +227,7 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
         return iterator(BufferSupplier.NO_CACHING);
     }
 
-    CloseableIterator<Record> iterator(BufferSupplier bufferSupplier) {
+    private CloseableIterator<Record> iterator(BufferSupplier bufferSupplier) {
         if (isCompressed())
             return new DeepRecordsIterator(this, false, Integer.MAX_VALUE, bufferSupplier);
 
@@ -498,16 +501,6 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
             buffer.putLong(LOG_OVERHEAD + LegacyRecord.TIMESTAMP_OFFSET, timestamp);
             long crc = record.computeChecksum();
             ByteUtils.writeUnsignedInt(buffer, LOG_OVERHEAD + LegacyRecord.CRC_OFFSET, crc);
-        }
-
-        /**
-         * LegacyRecordBatch does not implement this iterator and would hence fallback to the normal iterator.
-         *
-         * @return An iterator over the records contained within this batch
-         */
-        @Override
-        public CloseableIterator<Record> skipKeyValueIterator(BufferSupplier bufferSupplier) {
-            return CloseableIterator.wrap(iterator(bufferSupplier));
         }
 
         @Override

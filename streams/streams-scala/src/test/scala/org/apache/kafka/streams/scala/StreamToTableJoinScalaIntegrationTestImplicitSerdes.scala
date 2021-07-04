@@ -1,10 +1,10 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
+ * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2018 Alexis Seigneurin.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -18,21 +18,24 @@ package org.apache.kafka.streams.scala
 
 import java.util.Properties
 
-import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
-import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
+import org.apache.kafka.streams._
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala.kstream._
 import org.apache.kafka.streams.scala.utils.StreamToTableJoinScalaIntegrationTestBase
-import org.junit.jupiter.api._
-import org.junit.jupiter.api.Assertions._
+import org.apache.kafka.test.IntegrationTest
+import org.junit._
+import org.junit.experimental.categories.Category
 
 /**
  * Test suite that does an example to demonstrate stream-table joins in Kafka Streams
  * <p>
  * The suite contains the test case using Scala APIs `testShouldCountClicksPerRegion` and the same test case using the
  * Java APIs `testShouldCountClicksPerRegionJava`. The idea is to demonstrate that both generate the same result.
+ * <p>
+ * Note: In the current project settings SAM type conversion is turned off as it's experimental in Scala 2.11.
+ * Hence the native Java API based version is more verbose.
  */
-@Tag("integration")
+@Category(Array(classOf[IntegrationTest]))
 class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJoinScalaIntegrationTestBase {
 
   @Test def testShouldCountClicksPerRegion(): Unit = {
@@ -40,7 +43,7 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     // DefaultSerdes brings into scope implicit serdes (mostly for primitives) that will set up all Grouped, Produced,
     // Consumed and Joined instances. So all APIs below that accept Grouped, Produced, Consumed or Joined will
     // get these instances automatically
-    import org.apache.kafka.streams.scala.serialization.Serdes._
+    import Serdes._
 
     val streamsConfiguration: Properties = getStreamsConfiguration()
 
@@ -73,18 +76,17 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
       produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
 
-    assertTrue(!actualClicksPerRegion.isEmpty, "Expected to process some data")
+    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
 
     streams.close()
   }
 
-  @Test
-  def testShouldCountClicksPerRegionWithNamedRepartitionTopic(): Unit = {
+  @Test def testShouldCountClicksPerRegionWithNamedRepartitionTopic(): Unit = {
 
     // DefaultSerdes brings into scope implicit serdes (mostly for primitives) that will set up all Grouped, Produced,
     // Consumed and Joined instances. So all APIs below that accept Grouped, Produced, Consumed or Joined will
     // get these instances automatically
-    import org.apache.kafka.streams.scala.serialization.Serdes._
+    import Serdes._
 
     val streamsConfiguration: Properties = getStreamsConfiguration()
 
@@ -117,13 +119,12 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
       produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
 
-    assertTrue(!actualClicksPerRegion.isEmpty, "Expected to process some data")
+    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
 
     streams.close()
   }
 
-  @Test
-  def testShouldCountClicksPerRegionJava(): Unit = {
+  @Test def testShouldCountClicksPerRegionJava(): Unit = {
 
     import java.lang.{Long => JLong}
 
@@ -132,40 +133,50 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     val streamsConfiguration: Properties = getStreamsConfiguration()
 
-    streamsConfiguration.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, NewSerdes.stringSerde.getClass.getName)
-    streamsConfiguration.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, NewSerdes.stringSerde.getClass.getName)
+    streamsConfiguration.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String.getClass.getName)
+    streamsConfiguration.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String.getClass.getName)
 
     val builder: StreamsBuilderJ = new StreamsBuilderJ()
 
     val userClicksStream: KStreamJ[String, JLong] =
-      builder.stream[String, JLong](userClicksTopicJ, Consumed.`with`(NewSerdes.stringSerde, NewSerdes.javaLongSerde))
+      builder.stream[String, JLong](userClicksTopicJ, Consumed.`with`(Serdes.String, Serdes.JavaLong))
 
     val userRegionsTable: KTableJ[String, String] =
-      builder.table[String, String](userRegionsTopicJ, Consumed.`with`(NewSerdes.stringSerde, NewSerdes.stringSerde))
+      builder.table[String, String](userRegionsTopicJ, Consumed.`with`(Serdes.String, Serdes.String))
 
     // Join the stream against the table.
-    val valueJoinerJ: ValueJoiner[JLong, String, (String, JLong)] =
-      (clicks: JLong, region: String) => (if (region == null) "UNKNOWN" else region, clicks)
-    val userClicksJoinRegion: KStreamJ[String, (String, JLong)] = userClicksStream.leftJoin(
-      userRegionsTable,
-      valueJoinerJ,
-      Joined.`with`[String, JLong, String](NewSerdes.stringSerde, NewSerdes.javaLongSerde, NewSerdes.stringSerde)
-    )
+    val userClicksJoinRegion: KStreamJ[String, (String, JLong)] = userClicksStream
+      .leftJoin(
+        userRegionsTable,
+        new ValueJoiner[JLong, String, (String, JLong)] {
+          def apply(clicks: JLong, region: String): (String, JLong) =
+            (if (region == null) "UNKNOWN" else region, clicks)
+        },
+        Joined.`with`[String, JLong, String](Serdes.String, Serdes.JavaLong, Serdes.String)
+      )
 
     // Change the stream from <user> -> <region, clicks> to <region> -> <clicks>
-    val clicksByRegion: KStreamJ[String, JLong] = userClicksJoinRegion.map { (_, regionWithClicks) =>
-      new KeyValue(regionWithClicks._1, regionWithClicks._2)
-    }
+    val clicksByRegion: KStreamJ[String, JLong] = userClicksJoinRegion
+      .map {
+        new KeyValueMapper[String, (String, JLong), KeyValue[String, JLong]] {
+          def apply(k: String, regionWithClicks: (String, JLong)) =
+            new KeyValue[String, JLong](regionWithClicks._1, regionWithClicks._2)
+        }
+      }
 
     // Compute the total per region by summing the individual click counts per region.
     val clicksPerRegion: KTableJ[String, JLong] = clicksByRegion
-      .groupByKey(Grouped.`with`(NewSerdes.stringSerde, NewSerdes.javaLongSerde))
-      .reduce((v1, v2) => v1 + v2)
+      .groupByKey(Grouped.`with`[String, JLong](Serdes.String, Serdes.JavaLong))
+      .reduce {
+        new Reducer[JLong] {
+          def apply(v1: JLong, v2: JLong): JLong = v1 + v2
+        }
+      }
 
     // Write the (continuously updating) results to the output topic.
-    clicksPerRegion.toStream.to(outputTopicJ, Produced.`with`(NewSerdes.stringSerde, NewSerdes.javaLongSerde))
+    clicksPerRegion.toStream.to(outputTopicJ, Produced.`with`(Serdes.String, Serdes.JavaLong))
 
-    val streams = new KafkaStreamsJ(builder.build(), streamsConfiguration)
+    val streams: KafkaStreamsJ = new KafkaStreamsJ(builder.build(), streamsConfiguration)
 
     streams.start()
     produceNConsume(userClicksTopicJ, userRegionsTopicJ, outputTopicJ)

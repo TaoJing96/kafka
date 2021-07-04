@@ -26,10 +26,10 @@ import org.apache.kafka.common.record.TimestampType
 import org.apache.kafka.common.TopicPartition
 import kafka.utils.{ShutdownableThread, TestUtils}
 import kafka.server.{BaseRequestTest, KafkaConfig}
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.BeforeEach
+import org.junit.Assert._
+import org.junit.Before
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.mutable.{ArrayBuffer, Buffer}
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.common.errors.WakeupException
@@ -52,7 +52,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   val group = "my-test"
   val producerClientId = "ConsumerTestProducer"
   val consumerClientId = "ConsumerTestConsumer"
-  val groupMaxSessionTimeoutMs = 60000L
+  val groupMaxSessionTimeoutMs = 30000L
 
   this.producerConfig.setProperty(ProducerConfig.ACKS_CONFIG, "all")
   this.producerConfig.setProperty(ProducerConfig.CLIENT_ID_CONFIG, producerClientId)
@@ -61,8 +61,6 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   this.consumerConfig.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
   this.consumerConfig.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false")
   this.consumerConfig.setProperty(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "100")
-  this.consumerConfig.setProperty(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "6000")
-
 
   override protected def brokerPropertyOverrides(properties: Properties): Unit = {
     properties.setProperty(KafkaConfig.ControlledShutdownEnableProp, "false") // speed up shutdown
@@ -73,8 +71,8 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     properties.setProperty(KafkaConfig.GroupInitialRebalanceDelayMsProp, "10")
   }
 
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     super.setUp()
 
     // create the test topic with all the brokers as replicas
@@ -85,12 +83,12 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     var callsToAssigned = 0
     var callsToRevoked = 0
 
-    def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]): Unit = {
+    def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]) {
       info("onPartitionsAssigned called.")
       callsToAssigned += 1
     }
 
-    def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]): Unit = {
+    def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]) {
       info("onPartitionsRevoked called.")
       callsToRevoked += 1
     }
@@ -103,11 +101,9 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   }
 
   protected def sendRecords(producer: KafkaProducer[Array[Byte], Array[Byte]], numRecords: Int,
-                            tp: TopicPartition,
-                            startingTimestamp: Long = System.currentTimeMillis()): Seq[ProducerRecord[Array[Byte], Array[Byte]]] = {
+                            tp: TopicPartition): Seq[ProducerRecord[Array[Byte], Array[Byte]]] = {
     val records = (0 until numRecords).map { i =>
-      val timestamp = startingTimestamp + i.toLong
-      val record = new ProducerRecord(tp.topic(), tp.partition(), timestamp, s"key $i".getBytes, s"value $i".getBytes)
+      val record = new ProducerRecord(tp.topic(), tp.partition(), i.toLong, s"key $i".getBytes, s"value $i".getBytes)
       producer.send(record)
       record
     }
@@ -123,7 +119,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
                                         startingTimestamp: Long = 0L,
                                         timestampType: TimestampType = TimestampType.CREATE_TIME,
                                         tp: TopicPartition = tp,
-                                        maxPollRecords: Int = Int.MaxValue): Unit = {
+                                        maxPollRecords: Int = Int.MaxValue) {
     val records = consumeRecords(consumer, numRecords, maxPollRecords = maxPollRecords)
     val now = System.currentTimeMillis()
     for (i <- 0 until numRecords) {
@@ -136,8 +132,8 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
         val timestamp = startingTimestamp + i
         assertEquals(timestamp.toLong, record.timestamp)
       } else
-        assertTrue(record.timestamp >= startingTimestamp && record.timestamp <= now,
-          s"Got unexpected timestamp ${record.timestamp}. Timestamp should be between [$startingTimestamp, $now}]")
+        assertTrue(s"Got unexpected timestamp ${record.timestamp}. Timestamp should be between [$startingTimestamp, $now}]",
+          record.timestamp >= startingTimestamp && record.timestamp <= now)
       assertEquals(offset.toLong, record.offset)
       val keyAndValueIndex = startingKeyAndValueIndex + i
       assertEquals(s"key $keyAndValueIndex", new String(record.key))
@@ -325,39 +321,39 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
                                            partitionsToAssign: Set[TopicPartition])
     extends ShutdownableThread("daemon-consumer-assignment", false) {
 
-    def this(consumer: Consumer[Array[Byte], Array[Byte]], topicsToSubscribe: List[String]) = {
+    def this(consumer: Consumer[Array[Byte], Array[Byte]], topicsToSubscribe: List[String]) {
       this(consumer, topicsToSubscribe, Set.empty[TopicPartition])
     }
 
-    def this(consumer: Consumer[Array[Byte], Array[Byte]], partitionsToAssign: Set[TopicPartition]) = {
+    def this(consumer: Consumer[Array[Byte], Array[Byte]], partitionsToAssign: Set[TopicPartition]) {
       this(consumer, List.empty[String], partitionsToAssign)
     }
 
     @volatile var thrownException: Option[Throwable] = None
     @volatile var receivedMessages = 0
 
-    private val partitionAssignment = mutable.Set[TopicPartition]()
+    @volatile private var partitionAssignment: Set[TopicPartition] = partitionsToAssign
     @volatile private var subscriptionChanged = false
     private var topicsSubscription = topicsToSubscribe
 
     val rebalanceListener: ConsumerRebalanceListener = new ConsumerRebalanceListener {
       override def onPartitionsAssigned(partitions: util.Collection[TopicPartition]) = {
-        partitionAssignment ++= partitions.toArray(new Array[TopicPartition](0))
+        partitionAssignment = collection.immutable.Set(consumer.assignment().asScala.toArray: _*)
       }
 
       override def onPartitionsRevoked(partitions: util.Collection[TopicPartition]) = {
-        partitionAssignment --= partitions.toArray(new Array[TopicPartition](0))
+        partitionAssignment = Set.empty[TopicPartition]
       }
     }
 
-    if (partitionsToAssign.isEmpty) {
+    if (partitionAssignment.isEmpty) {
       consumer.subscribe(topicsToSubscribe.asJava, rebalanceListener)
     } else {
-      consumer.assign(partitionsToAssign.asJava)
+      consumer.assign(partitionAssignment.asJava)
     }
 
     def consumerAssignment(): Set[TopicPartition] = {
-      partitionAssignment.toSet
+      partitionAssignment
     }
 
     /**
@@ -426,7 +422,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     }
 
     // make sure that sum of all partitions to all consumers equals total number of partitions
-    val totalPartitionsInAssignments = assignments.foldLeft(0)(_ + _.size)
+    val totalPartitionsInAssignments = (0 /: assignments) (_ + _.size)
     if (totalPartitionsInAssignments != partitions.size) {
       // either same partitions got assigned to more than one consumer or some
       // partitions were not assigned
@@ -436,7 +432,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     // The above checks could miss the case where one or more partitions were assigned to more
     // than one consumer and the same number of partitions were missing from assignments.
     // Make sure that all unique assignments are the same as 'partitions'
-    val uniqueAssignedPartitions = assignments.foldLeft(Set.empty[TopicPartition])(_ ++ _)
+    val uniqueAssignedPartitions = (Set[TopicPartition]() /: assignments) (_ ++ _)
     uniqueAssignedPartitions == partitions
   }
 

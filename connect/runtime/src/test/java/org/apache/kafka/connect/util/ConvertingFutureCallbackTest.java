@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -96,11 +95,11 @@ public class ConvertingFutureCallbackTest {
         }
     }
   
-    @Test
-    public void shouldCancelBeforeGetIfMayCancelWhileRunning() {
+    @Test(expected = CancellationException.class)
+    public void shouldCancelBeforeGetIfMayCancelWhileRunning() throws Exception {
         TestConvertingFutureCallback testCallback = new TestConvertingFutureCallback();
         assertTrue(testCallback.cancel(true));
-        assertThrows(CancellationException.class, testCallback::get);
+        testCallback.get();
     }
 
     @Test
@@ -152,8 +151,8 @@ public class ConvertingFutureCallbackTest {
         }
     }
 
-    @Test
-    public void shouldBlockUntilCancellation() {
+    @Test(expected = CancellationException.class)
+    public void shouldBlockUntilCancellation() throws Exception {
         AtomicReference<Exception> testThreadException = new AtomicReference<>();
         TestConvertingFutureCallback testCallback = new TestConvertingFutureCallback();
         executor.submit(() -> {
@@ -165,7 +164,10 @@ public class ConvertingFutureCallbackTest {
             }
         });
         assertFalse(testCallback.isDone());
-        assertThrows(CancellationException.class, testCallback::get);
+        testCallback.get();
+        if (testThreadException.get() != null) {
+            throw testThreadException.get();
+        }
     }
 
     @Test
@@ -188,7 +190,9 @@ public class ConvertingFutureCallbackTest {
         assertTrue(testCallback.isDone());
         assertEquals(expectedConversion, testCallback.get());
         assertEquals(1, testCallback.numberOfConversions());
-        if (testThreadException.get() != null) assertThrows(CancellationException.class, testThreadException::get);
+        if (testThreadException.get() != null) {
+            throw testThreadException.get();
+        }
     }
   
     protected static class TestConvertingFutureCallback extends ConvertingFutureCallback<Object, Object> {

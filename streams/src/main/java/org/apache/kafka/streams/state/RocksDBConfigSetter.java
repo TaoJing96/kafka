@@ -27,9 +27,8 @@ import org.slf4j.LoggerFactory;
  * An interface to that allows developers to customize the RocksDB settings for a given Store.
  * Please read the <a href="https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide">RocksDB Tuning Guide</a>.
  *
- * Note: if you choose to modify the {@code org.rocksdb.BlockBasedTableConfig} you should retrieve a reference to
- * the existing one (rather than create a new BlockBasedTableConfig object) so as to not lose the other default settings.
- * This can be done as {@code BlockBasedTableConfig tableConfig = (BlockBasedTableConfig) options.tableFormatConfig();}
+ * Note: if you choose to set options.setTableFormatConfig(tableConfig) with a new BlockBasedTableConfig you should
+ * probably also set the filter for that tableConfig, most likely with tableConfig.setFilter(new BloomFilter());
  */
 public interface RocksDBConfigSetter {
 
@@ -57,5 +56,7 @@ public interface RocksDBConfigSetter {
      * @param storeName     the name of the store being configured
      * @param options       the RocksDB options
      */
-    void close(final String storeName, final Options options);
+    default void close(final String storeName, final Options options) {
+        LOG.warn("The default close will be removed in 3.0.0 -- you should overwrite it if you have implemented RocksDBConfigSetter");
+    }
 }

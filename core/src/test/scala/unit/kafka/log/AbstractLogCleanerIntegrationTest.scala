@@ -19,19 +19,22 @@ package kafka.log
 import java.io.File
 import java.nio.file.Files
 import java.util.Properties
+
 import kafka.server.{BrokerTopicStats, LogDirFailureChannel}
 import kafka.utils.{MockTime, Pool, TestUtils}
 import kafka.utils.Implicits._
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.record.{CompressionType, MemoryRecords, RecordBatch}
 import org.apache.kafka.common.utils.Utils
-import org.junit.jupiter.api.{AfterEach, Tag}
+import org.apache.kafka.test.IntegrationTest
+import org.junit.After
+import org.junit.experimental.categories.Category
 
 import scala.collection.Seq
 import scala.collection.mutable.ListBuffer
 import scala.util.Random
 
-@Tag("integration")
+@Category(Array(classOf[IntegrationTest]))
 abstract class AbstractLogCleanerIntegrationTest {
 
   var cleaner: LogCleaner = _
@@ -47,7 +50,7 @@ abstract class AbstractLogCleanerIntegrationTest {
 
   def time: MockTime
 
-  @AfterEach
+  @After
   def teardown(): Unit = {
     if (cleaner != null)
       cleaner.shutdown()
@@ -110,9 +113,7 @@ abstract class AbstractLogCleanerIntegrationTest {
         brokerTopicStats = new BrokerTopicStats,
         maxProducerIdExpirationMs = 60 * 60 * 1000,
         producerIdExpirationCheckIntervalMs = LogManager.ProducerIdExpirationCheckIntervalMs,
-        logDirFailureChannel = new LogDirFailureChannel(10),
-        topicId = None,
-        keepPartitionMetadataFile = true)
+        logDirFailureChannel = new LogDirFailureChannel(10))
       logMap.put(partition, log)
       this.logs += log
     }
@@ -129,6 +130,7 @@ abstract class AbstractLogCleanerIntegrationTest {
       time = time)
   }
 
+  def codec: CompressionType
   private var ctr = 0
   def counter: Int = ctr
   def incCounter(): Unit = ctr += 1
@@ -140,11 +142,11 @@ abstract class AbstractLogCleanerIntegrationTest {
       val appendInfo = log.appendAsLeader(TestUtils.singletonRecords(value = value.toString.getBytes, codec = codec,
         key = key.toString.getBytes, magicValue = magicValue), leaderEpoch = 0)
       incCounter()
-      (key, value, appendInfo.firstOffset.get.messageOffset)
+      (key, value, appendInfo.firstOffset.get)
     }
   }
 
-  def createLargeSingleMessageSet(key: Int, messageFormatVersion: Byte, codec: CompressionType): (String, MemoryRecords) = {
+  def createLargeSingleMessageSet(key: Int, messageFormatVersion: Byte): (String, MemoryRecords) = {
     def messageValue(length: Int): String = {
       val random = new Random(0)
       new String(random.alphanumeric.take(length).toArray)

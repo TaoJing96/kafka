@@ -17,11 +17,6 @@
 package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.compress.KafkaLZ4BlockInputStream;
-import org.apache.kafka.common.compress.KafkaLZ4BlockOutputStream;
-import org.apache.kafka.common.compress.SnappyFactory;
-import org.apache.kafka.common.compress.ZstdFactory;
-import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferInputStream;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 
@@ -29,6 +24,9 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.ByteBuffer;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -49,7 +47,6 @@ public enum CompressionType {
         }
     },
 
-    // Shipped with the JDK
     GZIP(1, "gzip", 1.0f) {
         @Override
         public OutputStream wrapForOutput(ByteBufferOutputStream buffer, byte messageVersion) {
@@ -77,21 +74,23 @@ public enum CompressionType {
         }
     },
 
-    // We should only load classes from a given compression library when we actually use said compression library. This
-    // is because compression libraries include native code for a set of platforms and we want to avoid errors
-    // in case the platform is not supported and the compression library is not actually used.
-    // To ensure this, we only reference compression library code from classes that are only invoked when actual usage
-    // happens.
-
     SNAPPY(2, "snappy", 1.0f) {
         @Override
         public OutputStream wrapForOutput(ByteBufferOutputStream buffer, byte messageVersion) {
-            return SnappyFactory.wrapForOutput(buffer);
+            try {
+                return (OutputStream) SnappyConstructors.OUTPUT.invoke(buffer);
+            } catch (Throwable e) {
+                throw new KafkaException(e);
+            }
         }
 
         @Override
         public InputStream wrapForInput(ByteBuffer buffer, byte messageVersion, BufferSupplier decompressionBufferSupplier) {
-            return SnappyFactory.wrapForInput(buffer);
+            try {
+                return (InputStream) SnappyConstructors.INPUT.invoke(new ByteBufferInputStream(buffer));
+            } catch (Throwable e) {
+                throw new KafkaException(e);
+            }
         }
     },
 
@@ -119,12 +118,20 @@ public enum CompressionType {
     ZSTD(4, "zstd", 1.0f) {
         @Override
         public OutputStream wrapForOutput(ByteBufferOutputStream buffer, byte messageVersion) {
-            return ZstdFactory.wrapForOutput(buffer);
+            try {
+                return (OutputStream) ZstdConstructors.OUTPUT.invoke(buffer);
+            } catch (Throwable e) {
+                throw new KafkaException(e);
+            }
         }
 
         @Override
         public InputStream wrapForInput(ByteBuffer buffer, byte messageVersion, BufferSupplier decompressionBufferSupplier) {
-            return ZstdFactory.wrapForInput(buffer, messageVersion, decompressionBufferSupplier);
+            try {
+                return (InputStream) ZstdConstructors.INPUT.invoke(new ByteBufferInputStream(buffer));
+            } catch (Throwable e) {
+                throw new KafkaException(e);
+            }
         }
     };
 
@@ -190,4 +197,36 @@ public enum CompressionType {
         else
             throw new IllegalArgumentException("Unknown compression name: " + name);
     }
+
+    // We should only have a runtime dependency on compression algorithms in case the native libraries don't support
+    // some platforms.
+    //
+    // For Snappy and Zstd, we dynamically load the classes and rely on the initialization-on-demand holder idiom to ensure
+    // they're only loaded if used.
+    //
+    // For LZ4 we are using org.apache.kafka classes, which should always be in the classpath, and would not trigger
+    // an error until KafkaLZ4BlockInputStream is initialized, which only happens if LZ4 is actually used.
+
+    private static class SnappyConstructors {
+        static final MethodHandle INPUT = findConstructor("org.xerial.snappy.SnappyInputStream",
+                MethodType.methodType(void.class, InputStream.class));
+        static final MethodHandle OUTPUT = findConstructor("org.xerial.snappy.SnappyOutputStream",
+                MethodType.methodType(void.class, OutputStream.class));
+    }
+
+    private static class ZstdConstructors {
+        static final MethodHandle INPUT = findConstructor("com.github.luben.zstd.ZstdInputStream",
+            MethodType.methodType(void.class, InputStream.class));
+        static final MethodHandle OUTPUT = findConstructor("com.github.luben.zstd.ZstdOutputStream",
+            MethodType.methodType(void.class, OutputStream.class));
+    }
+
+    private static MethodHandle findConstructor(String className, MethodType methodType) {
+        try {
+            return MethodHandles.publicLookup().findConstructor(Class.forName(className), methodType);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 }

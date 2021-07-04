@@ -34,7 +34,7 @@ class FileLock(val file: File) extends Logging {
   /**
    * Lock the file or throw an exception if the lock is already held
    */
-  def lock(): Unit = {
+  def lock() {
     this synchronized {
       trace(s"Acquiring lock on ${file.getAbsolutePath}")
       flock = channel.lock()
@@ -62,7 +62,7 @@ class FileLock(val file: File) extends Logging {
   /**
    * Unlock the lock if it is held
    */
-  def unlock(): Unit = {
+  def unlock() {
     this synchronized {
       trace(s"Releasing lock on ${file.getAbsolutePath}")
       if(flock != null)

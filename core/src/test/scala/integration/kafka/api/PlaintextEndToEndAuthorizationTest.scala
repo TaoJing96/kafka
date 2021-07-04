@@ -19,9 +19,10 @@ package kafka.api
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth._
-import org.junit.jupiter.api.{BeforeEach, Test}
-import org.junit.jupiter.api.Assertions._
+import org.junit.{Before, Test}
+import org.junit.Assert._
 import org.apache.kafka.common.errors.TopicAuthorizationException
+import org.scalatest.Assertions.intercept
 
 // This test case uses a separate listener for client and inter-broker communication, from
 // which we derive corresponding principals
@@ -66,20 +67,20 @@ class PlaintextEndToEndAuthorizationTest extends EndToEndAuthorizationTest {
     classOf[TestClientPrincipalBuilder].getName)
   this.serverConfig.setProperty("listener.name.server." + BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_CONFIG,
     classOf[TestServerPrincipalBuilder].getName)
-  override val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "client")
-  override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "server")
+  override val clientPrincipal = "client"
+  override val kafkaPrincipal = "server"
 
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     startSasl(jaasSections(List.empty, None, ZkSasl))
     super.setUp()
   }
 
   @Test
-  def testListenerName(): Unit = {
+  def testListenerName() {
     // To check the client listener name, establish a session on the server by sending any request eg sendRecords
     val producer = createProducer()
-    assertThrows(classOf[TopicAuthorizationException], () => sendRecords(producer, numRecords = 1, tp))
+    intercept[TopicAuthorizationException](sendRecords(producer, numRecords = 1, tp))
 
     assertEquals(Some("CLIENT"), PlaintextEndToEndAuthorizationTest.clientListenerName)
     assertEquals(Some("SERVER"), PlaintextEndToEndAuthorizationTest.serverListenerName)

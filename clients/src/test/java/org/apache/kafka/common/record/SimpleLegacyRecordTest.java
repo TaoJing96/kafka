@@ -16,22 +16,20 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.InvalidRecordException;
-import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.Utils;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.io.DataOutputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.fail;
 
 public class SimpleLegacyRecordTest {
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testCompressedIterationWithNullValue() throws Exception {
         ByteBuffer buffer = ByteBuffer.allocate(128);
         DataOutputStream out = new DataOutputStream(new ByteBufferOutputStream(buffer));
@@ -40,11 +38,13 @@ public class SimpleLegacyRecordTest {
                 CompressionType.GZIP, TimestampType.CREATE_TIME);
 
         buffer.flip();
+
         MemoryRecords records = MemoryRecords.readableRecords(buffer);
-        assertThrows(InvalidRecordException.class, () -> records.records().iterator().hasNext());
+        if (records.records().iterator().hasNext())
+            fail("Iteration should have caused invalid record error");
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testCompressedIterationWithEmptyRecords() throws Exception {
         ByteBuffer emptyCompressedValue = ByteBuffer.allocate(64);
         OutputStream gzipOutput = CompressionType.GZIP.wrapForOutput(new ByteBufferOutputStream(emptyCompressedValue),
@@ -61,27 +61,27 @@ public class SimpleLegacyRecordTest {
         buffer.flip();
 
         MemoryRecords records = MemoryRecords.readableRecords(buffer);
-        assertThrows(InvalidRecordException.class, () -> records.records().iterator().hasNext());
+        if (records.records().iterator().hasNext())
+            fail("Iteration should have caused invalid record error");
     }
 
     /* This scenario can happen if the record size field is corrupt and we end up allocating a buffer that is too small */
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testIsValidWithTooSmallBuffer() {
         ByteBuffer buffer = ByteBuffer.allocate(2);
         LegacyRecord record = new LegacyRecord(buffer);
         assertFalse(record.isValid());
-        assertThrows(CorruptRecordException.class, record::ensureValid);
-
+        record.ensureValid();
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testIsValidWithChecksumMismatch() {
         ByteBuffer buffer = ByteBuffer.allocate(4);
         // set checksum
         buffer.putInt(2);
         LegacyRecord record = new LegacyRecord(buffer);
         assertFalse(record.isValid());
-        assertThrows(CorruptRecordException.class, record::ensureValid);
+        record.ensureValid();
     }
 
 }

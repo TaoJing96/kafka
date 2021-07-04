@@ -16,6 +16,8 @@
  */
 package org.apache.kafka.streams.processor;
 
+import org.apache.kafka.common.annotation.InterfaceStability;
+
 import java.time.Duration;
 
 /**
@@ -23,9 +25,8 @@ import java.time.Duration;
  *
  * @param <K> the type of keys
  * @param <V> the type of values
- * @deprecated Since 3.0. Use {@link org.apache.kafka.streams.processor.api.Processor} instead.
  */
-@Deprecated
+@InterfaceStability.Evolving
 public interface Processor<K, V> {
 
     /**

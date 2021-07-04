@@ -39,9 +39,6 @@ import static org.apache.kafka.connect.runtime.ConnectorConfig.KEY_CONVERTER_CLA
 import static org.apache.kafka.connect.runtime.ConnectorConfig.TASKS_MAX_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.VALUE_CONVERTER_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.SinkConnectorConfig.TOPICS_CONFIG;
-import static org.apache.kafka.connect.runtime.TopicCreationConfig.DEFAULT_TOPIC_CREATION_PREFIX;
-import static org.apache.kafka.connect.runtime.TopicCreationConfig.PARTITIONS_CONFIG;
-import static org.apache.kafka.connect.runtime.TopicCreationConfig.REPLICATION_FACTOR_CONFIG;
 import static org.apache.kafka.connect.runtime.WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG;
 import static org.apache.kafka.test.TestUtils.waitForCondition;
 import static org.junit.Assert.assertEquals;
@@ -65,8 +62,6 @@ public class ExampleConnectIntegrationTest {
     private static final int NUM_TASKS = 3;
     private static final int NUM_WORKERS = 3;
     private static final String CONNECTOR_NAME = "simple-conn";
-    private static final String SINK_CONNECTOR_CLASS_NAME = MonitorableSinkConnector.class.getSimpleName();
-    private static final String SOURCE_CONNECTOR_CLASS_NAME = MonitorableSourceConnector.class.getSimpleName();
 
     private EmbeddedConnectCluster connect;
     private ConnectorHandle connectorHandle;
@@ -120,7 +115,7 @@ public class ExampleConnectIntegrationTest {
 
         // setup up props for the sink connector
         Map<String, String> props = new HashMap<>();
-        props.put(CONNECTOR_CLASS_CONFIG, SINK_CONNECTOR_CLASS_NAME);
+        props.put(CONNECTOR_CLASS_CONFIG, MonitorableSinkConnector.class.getSimpleName());
         props.put(TASKS_MAX_CONFIG, String.valueOf(NUM_TASKS));
         props.put(TOPICS_CONFIG, "test-topic");
         props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
@@ -131,17 +126,6 @@ public class ExampleConnectIntegrationTest {
 
         // expect all records to be consumed by the connector
         connectorHandle.expectedCommits(NUM_RECORDS_PRODUCED);
-
-        // validate the intended connector configuration, a config that errors
-        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(SINK_CONNECTOR_CLASS_NAME, props, 1,
-            "Validating connector configuration produced an unexpected number or errors.");
-
-        // add missing configuration to make the config valid
-        props.put("name", CONNECTOR_NAME);
-
-        // validate the intended connector configuration, a valid config
-        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(SINK_CONNECTOR_CLASS_NAME, props, 0,
-            "Validating connector configuration produced an unexpected number or errors.");
 
         // start a sink connector
         connect.configureConnector(CONNECTOR_NAME, props);
@@ -163,7 +147,7 @@ public class ExampleConnectIntegrationTest {
         connectorHandle.awaitRecords(RECORD_TRANSFER_DURATION_MS);
 
         // wait for the connector tasks to commit all records.
-        connectorHandle.awaitCommits(RECORD_TRANSFER_DURATION_MS);
+        connectorHandle.awaitCommits(CONNECTOR_SETUP_DURATION_MS);
 
         // delete connector
         connect.deleteConnector(CONNECTOR_NAME);
@@ -178,33 +162,19 @@ public class ExampleConnectIntegrationTest {
         // create test topic
         connect.kafka().createTopic("test-topic", NUM_TOPIC_PARTITIONS);
 
-        // setup up props for the source connector
+        // setup up props for the sink connector
         Map<String, String> props = new HashMap<>();
-        props.put(CONNECTOR_CLASS_CONFIG, SOURCE_CONNECTOR_CLASS_NAME);
+        props.put(CONNECTOR_CLASS_CONFIG, MonitorableSourceConnector.class.getSimpleName());
         props.put(TASKS_MAX_CONFIG, String.valueOf(NUM_TASKS));
         props.put("topic", "test-topic");
-        props.put("throughput", String.valueOf(500));
         props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
         props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
-        props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(1));
-        props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(1));
 
         // expect all records to be produced by the connector
         connectorHandle.expectedRecords(NUM_RECORDS_PRODUCED);
 
         // expect all records to be produced by the connector
         connectorHandle.expectedCommits(NUM_RECORDS_PRODUCED);
-
-        // validate the intended connector configuration, a config that errors
-        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(SOURCE_CONNECTOR_CLASS_NAME, props, 1,
-            "Validating connector configuration produced an unexpected number or errors.");
-
-        // add missing configuration to make the config valid
-        props.put("name", CONNECTOR_NAME);
-
-        // validate the intended connector configuration, a valid config
-        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(SOURCE_CONNECTOR_CLASS_NAME, props, 0,
-            "Validating connector configuration produced an unexpected number or errors.");
 
         // start a source connector
         connect.configureConnector(CONNECTOR_NAME, props);
@@ -213,7 +183,7 @@ public class ExampleConnectIntegrationTest {
         connectorHandle.awaitRecords(RECORD_TRANSFER_DURATION_MS);
 
         // wait for the connector tasks to commit enough records
-        connectorHandle.awaitCommits(RECORD_TRANSFER_DURATION_MS);
+        connectorHandle.awaitCommits(CONNECTOR_SETUP_DURATION_MS);
 
         // consume all records from the source topic or fail, to ensure that they were correctly produced
         int recordNum = connect.kafka().consume(NUM_RECORDS_PRODUCED, RECORD_TRANSFER_DURATION_MS, "test-topic").count();

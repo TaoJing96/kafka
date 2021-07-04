@@ -19,28 +19,30 @@ package org.apache.kafka.common.network;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.GatheringByteChannel;
 
 /**
  * A send backed by an array of byte buffers
  */
 public class ByteBufferSend implements Send {
 
-    private final long size;
+    private final String destination;
+    private final int size;
     protected final ByteBuffer[] buffers;
-    private long remaining;
+    private int remaining;
     private boolean pending = false;
 
-    public ByteBufferSend(ByteBuffer... buffers) {
+    public ByteBufferSend(String destination, ByteBuffer... buffers) {
+        this.destination = destination;
         this.buffers = buffers;
         for (ByteBuffer buffer : buffers)
             remaining += buffer.remaining();
         this.size = remaining;
     }
 
-    public ByteBufferSend(ByteBuffer[] buffers, long size) {
-        this.buffers = buffers;
-        this.size = size;
-        this.remaining = size;
+    @Override
+    public String destination() {
+        return destination;
     }
 
     @Override
@@ -54,31 +56,12 @@ public class ByteBufferSend implements Send {
     }
 
     @Override
-    public long writeTo(TransferableChannel channel) throws IOException {
+    public long writeTo(GatheringByteChannel channel) throws IOException {
         long written = channel.write(buffers);
         if (written < 0)
             throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
         remaining -= written;
-        pending = channel.hasPendingWrites();
+        pending = TransportLayers.hasPendingWrites(channel);
         return written;
-    }
-
-    public long remaining() {
-        return remaining;
-    }
-
-    @Override
-    public String toString() {
-        return "ByteBufferSend(" +
-            ", size=" + size +
-            ", remaining=" + remaining +
-            ", pending=" + pending +
-            ')';
-    }
-
-    public static ByteBufferSend sizePrefixed(ByteBuffer buffer) {
-        ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
-        sizeBuffer.putInt(0, buffer.remaining());
-        return new ByteBufferSend(sizeBuffer, buffer);
     }
 }

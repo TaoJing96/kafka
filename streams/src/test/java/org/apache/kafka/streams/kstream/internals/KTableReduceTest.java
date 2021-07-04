@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
+import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -31,14 +32,13 @@ import static java.util.Collections.singleton;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-@SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
 public class KTableReduceTest {
 
     @Test
     public void shouldAddAndSubtract() {
-        final InternalMockProcessorContext<String, Change<Set<String>>> context = new InternalMockProcessorContext<>();
+        final InternalMockProcessorContext context = new InternalMockProcessorContext();
 
-        final org.apache.kafka.streams.processor.Processor<String, Change<Set<String>>> reduceProcessor =
+        final Processor<String, Change<Set<String>>> reduceProcessor =
             new KTableReduce<String, Set<String>>(
                 "myStore",
                 this::unionNotNullArgs,

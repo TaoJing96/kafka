@@ -17,11 +17,17 @@
 package org.apache.kafka.common.network;
 
 import java.io.IOException;
+import java.nio.channels.GatheringByteChannel;
 
 /**
- * This interface models the in-progress sending of data.
+ * This interface models the in-progress sending of data to a specific destination
  */
 public interface Send {
+
+    /**
+     * The id for the destination of this send
+     */
+    String destination();
 
     /**
      * Is this send complete?
@@ -35,7 +41,7 @@ public interface Send {
      * @return The number of bytes written
      * @throws IOException If the write fails
      */
-    long writeTo(TransferableChannel channel) throws IOException;
+    long writeTo(GatheringByteChannel channel) throws IOException;
 
     /**
      * Size of the send

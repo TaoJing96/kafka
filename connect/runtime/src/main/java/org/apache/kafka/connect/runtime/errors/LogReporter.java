@@ -16,15 +16,12 @@
  */
 package org.apache.kafka.connect.runtime.errors;
 
-import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
 
 /**
  * Writes errors and their context to application logs.
@@ -32,7 +29,6 @@ import java.util.concurrent.Future;
 public class LogReporter implements ErrorReporter {
 
     private static final Logger log = LoggerFactory.getLogger(LogReporter.class);
-    private static final Future<RecordMetadata> COMPLETED = CompletableFuture.completedFuture(null);
 
     private final ConnectorTaskId id;
     private final ConnectorConfig connConfig;
@@ -54,18 +50,17 @@ public class LogReporter implements ErrorReporter {
      * @param context the processing context.
      */
     @Override
-    public Future<RecordMetadata> report(ProcessingContext context) {
+    public void report(ProcessingContext context) {
         if (!connConfig.enableErrorLog()) {
-            return COMPLETED;
+            return;
         }
 
         if (!context.failed()) {
-            return COMPLETED;
+            return;
         }
 
         log.error(message(context), context.error());
         errorHandlingMetrics.recordErrorLogged();
-        return COMPLETED;
     }
 
     // Visible for testing

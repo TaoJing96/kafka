@@ -26,7 +26,7 @@ import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.LogContext;
 import org.junit.Test;
 
-import java.util.Optional;
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
 
@@ -38,13 +38,14 @@ public class RecordDeserializerTest {
         1,
         10,
         TimestampType.LOG_APPEND_TIME,
+        5L,
         3,
         5,
         new byte[0],
         new byte[0],
-        headers,
-        Optional.empty());
+        headers);
 
+    @SuppressWarnings("deprecation")
     @Test
     public void shouldReturnConsumerRecordWithDeserializedValueWhenNoExceptions() {
         final RecordDeserializer recordDeserializer = new RecordDeserializer(
@@ -55,12 +56,13 @@ public class RecordDeserializerTest {
             ),
             null,
             new LogContext(),
-            new Metrics().sensor("dropped-records")
+            new Metrics().sensor("skipped-records")
         );
         final ConsumerRecord<Object, Object> record = recordDeserializer.deserialize(null, rawRecord);
         assertEquals(rawRecord.topic(), record.topic());
         assertEquals(rawRecord.partition(), record.partition());
         assertEquals(rawRecord.offset(), record.offset());
+        assertEquals(rawRecord.checksum(), record.checksum());
         assertEquals("key", record.key());
         assertEquals("value", record.value());
         assertEquals(rawRecord.timestamp(), record.timestamp());
@@ -78,7 +80,7 @@ public class RecordDeserializerTest {
                       final boolean valueThrowsException,
                       final Object key,
                       final Object value) {
-            super("", null, null);
+            super("", Collections.emptyList(), null, null);
             this.keyThrowsException = keyThrowsException;
             this.valueThrowsException = valueThrowsException;
             this.key = key;

@@ -24,9 +24,7 @@ import java.util.Set;
 
 /**
  * Represents the state of a single thread running within a {@link KafkaStreams} application.
- * @deprecated since 3.0 use {@link org.apache.kafka.streams.ThreadMetadata} instead
  */
-@Deprecated
 public class ThreadMetadata {
 
     private final String threadName;
@@ -53,8 +51,8 @@ public class ThreadMetadata {
                           final String restoreConsumerClientId,
                           final Set<String> producerClientIds,
                           final String adminClientId,
-                          final Set<org.apache.kafka.streams.processor.TaskMetadata> activeTasks,
-                          final Set<org.apache.kafka.streams.processor.TaskMetadata> standbyTasks) {
+                          final Set<TaskMetadata> activeTasks,
+                          final Set<TaskMetadata> standbyTasks) {
         this.mainConsumerClientId = mainConsumerClientId;
         this.restoreConsumerClientId = restoreConsumerClientId;
         this.producerClientIds = producerClientIds;
@@ -73,11 +71,11 @@ public class ThreadMetadata {
         return threadName;
     }
 
-    public Set<org.apache.kafka.streams.processor.TaskMetadata> activeTasks() {
+    public Set<TaskMetadata> activeTasks() {
         return activeTasks;
     }
 
-    public Set<org.apache.kafka.streams.processor.TaskMetadata> standbyTasks() {
+    public Set<TaskMetadata> standbyTasks() {
         return standbyTasks;
     }
 

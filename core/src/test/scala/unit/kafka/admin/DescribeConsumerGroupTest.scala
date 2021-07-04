@@ -18,12 +18,13 @@ package kafka.admin
 
 import java.util.Properties
 
-import kafka.utils.{Exit, TestUtils}
+import joptsimple.OptionException
+import kafka.utils.TestUtils
 import org.apache.kafka.clients.consumer.{ConsumerConfig, RoundRobinAssignor}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.TimeoutException
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
+import org.junit.Assert._
+import org.junit.Test
 
 import scala.concurrent.ExecutionException
 import scala.util.Random
@@ -36,7 +37,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
   private val describeTypes = describeTypeOffsets ++ describeTypeMembers ++ describeTypeState
 
   @Test
-  def testDescribeNonExistingGroup(): Unit = {
+  def testDescribeNonExistingGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
     val missingGroup = "missing.group"
 
@@ -46,55 +47,20 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val service = getConsumerGroupService(cgcArgs)
 
       val output = TestUtils.grabConsoleOutput(service.describeGroups())
-      assertTrue(output.contains(s"Consumer group '$missingGroup' does not exist."),
-        s"Expected error was not detected for describe option '${describeType.mkString(" ")}'")
+      assertTrue(s"Expected error was not detected for describe option '${describeType.mkString(" ")}'",
+          output.contains(s"Consumer group '$missingGroup' does not exist."))
     }
   }
 
-  @Test
-  def testDescribeWithMultipleSubActions(): Unit = {
-    var exitStatus: Option[Int] = None
-    var exitMessage: Option[String] = None
-    Exit.setExitProcedure { (status, err) =>
-      exitStatus = Some(status)
-      exitMessage = err
-      throw new RuntimeException
-    }
+  @Test(expected = classOf[OptionException])
+  def testDescribeWithMultipleSubActions() {
+    TestUtils.createOffsetsTopic(zkClient, servers)
     val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group, "--members", "--state")
-    try {
-      ConsumerGroupCommand.main(cgcArgs)
-    } catch {
-      case e: RuntimeException => //expected
-    } finally {
-      Exit.resetExitProcedure()
-    }
-    assertEquals(Some(1), exitStatus)
-    assertTrue(exitMessage.get.contains("Option [describe] takes at most one of these options"))
+    getConsumerGroupService(cgcArgs)
   }
 
   @Test
-  def testDescribeWithStateValue(): Unit = {
-    var exitStatus: Option[Int] = None
-    var exitMessage: Option[String] = None
-    Exit.setExitProcedure { (status, err) =>
-      exitStatus = Some(status)
-      exitMessage = err
-      throw new RuntimeException
-    }
-    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--all-groups", "--state", "Stable")
-    try {
-      ConsumerGroupCommand.main(cgcArgs)
-    } catch {
-      case e: RuntimeException => //expected
-    } finally {
-      Exit.resetExitProcedure()
-    }
-    assertEquals(Some(1), exitStatus)
-    assertTrue(exitMessage.get.contains("Option [describe] does not take a value for [state]"))
-  }
-
-  @Test
-  def testDescribeOffsetsOfNonExistingGroup(): Unit = {
+  def testDescribeOffsetsOfNonExistingGroup() {
     val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
@@ -105,12 +71,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     val (state, assignments) = service.collectGroupOffsets(group)
-    assertTrue(state.contains("Dead") && assignments.contains(List()),
-      s"Expected the state to be 'Dead', with no members in the group '$group'.")
+    assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
+        state.contains("Dead") && assignments.contains(List()))
   }
 
   @Test
-  def testDescribeMembersOfNonExistingGroup(): Unit = {
+  def testDescribeMembersOfNonExistingGroup() {
     val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
@@ -121,16 +87,16 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     val (state, assignments) = service.collectGroupMembers(group, false)
-    assertTrue(state.contains("Dead") && assignments.contains(List()),
-      s"Expected the state to be 'Dead', with no members in the group '$group'.")
+    assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
+        state.contains("Dead") && assignments.contains(List()))
 
     val (state2, assignments2) = service.collectGroupMembers(group, true)
-    assertTrue(state2.contains("Dead") && assignments2.contains(List()),
-      s"Expected the state to be 'Dead', with no members in the group '$group' (verbose option).")
+    assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group' (verbose option).",
+        state2.contains("Dead") && assignments2.contains(List()))
   }
 
   @Test
-  def testDescribeStateOfNonExistingGroup(): Unit = {
+  def testDescribeStateOfNonExistingGroup() {
     val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
@@ -141,14 +107,14 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     val state = service.collectGroupState(group)
-    assertTrue(state.state == "Dead" && state.numMembers == 0 &&
-      state.coordinator != null && servers.map(_.config.brokerId).toList.contains(state.coordinator.id),
-      s"Expected the state to be 'Dead', with no members in the group '$group'."
+    assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
+        state.state == "Dead" && state.numMembers == 0 &&
+        state.coordinator != null && servers.map(_.config.brokerId).toList.contains(state.coordinator.id)
     )
   }
 
   @Test
-  def testDescribeExistingGroup(): Unit = {
+  def testDescribeExistingGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     for (describeType <- describeTypes) {
@@ -161,12 +127,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       TestUtils.waitUntilTrue(() => {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         output.trim.split("\n").length == 2 && error.isEmpty
-      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.")
+      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeExistingGroups(): Unit = {
+  def testDescribeExistingGroups() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // Create N single-threaded consumer groups from a single-partition topic
@@ -186,12 +152,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         val numLines = output.trim.split("\n").filterNot(line => line.isEmpty).length
         (numLines == expectedNumLines) && error.isEmpty
-      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.")
+      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeAllExistingGroups(): Unit = {
+  def testDescribeAllExistingGroups() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // Create N single-threaded consumer groups from a single-partition topic
@@ -210,12 +176,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         val numLines = output.trim.split("\n").filterNot(line => line.isEmpty).length
         (numLines == expectedNumLines) && error.isEmpty
-      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.")
+      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeOffsetsOfExistingGroup(): Unit = {
+  def testDescribeOffsetsOfExistingGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -232,11 +198,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.filter(_.group == group).head.consumerId.exists(_.trim != ConsumerGroupCommand.MISSING_COLUMN_VALUE) &&
         assignments.get.filter(_.group == group).head.clientId.exists(_.trim != ConsumerGroupCommand.MISSING_COLUMN_VALUE) &&
         assignments.get.filter(_.group == group).head.host.exists(_.trim != ConsumerGroupCommand.MISSING_COLUMN_VALUE)
-    }, s"Expected a 'Stable' group status, rows and valid values for consumer id / client id / host columns in describe results for group $group.")
+    }, s"Expected a 'Stable' group status, rows and valid values for consumer id / client id / host columns in describe results for group $group.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeMembersOfExistingGroup(): Unit = {
+  def testDescribeMembersOfExistingGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -256,20 +222,21 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
           case None =>
             false
         })
-    }, s"Expected a 'Stable' group status, rows and valid member information for group $group.")
+    }, s"Expected a 'Stable' group status, rows and valid member information for group $group.", maxRetries = 3)
 
     val (_, assignments) = service.collectGroupMembers(group, true)
     assignments match {
       case None =>
         fail(s"Expected partition assignments for members of group $group")
       case Some(memberAssignments) =>
-        assertTrue(memberAssignments.size == 1 && memberAssignments.head.assignment.size == 1,
-          s"Expected a topic partition assigned to the single group member for group $group")
+        assertTrue(s"Expected a topic partition assigned to the single group member for group $group",
+          memberAssignments.size == 1 &&
+          memberAssignments.head.assignment.size == 1)
     }
   }
 
   @Test
-  def testDescribeStateOfExistingGroup(): Unit = {
+  def testDescribeStateOfExistingGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -284,11 +251,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         state.assignmentStrategy == "range" &&
         state.coordinator != null &&
         servers.map(_.config.brokerId).toList.contains(state.coordinator.id)
-    }, s"Expected a 'Stable' group status, with one member and round robin assignment strategy for group $group.")
+    }, s"Expected a 'Stable' group status, with one member and round robin assignment strategy for group $group.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeStateOfExistingGroupWithRoundRobinAssignor(): Unit = {
+  def testDescribeStateOfExistingGroupWithRoundRobinAssignor() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -303,11 +270,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         state.assignmentStrategy == "roundrobin" &&
         state.coordinator != null &&
         servers.map(_.config.brokerId).toList.contains(state.coordinator.id)
-    }, s"Expected a 'Stable' group status, with one member and round robin assignment strategy for group $group.")
+    }, s"Expected a 'Stable' group status, with one member and round robin assignment strategy for group $group.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeExistingGroupWithNoMembers(): Unit = {
+  def testDescribeExistingGroupWithNoMembers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     for (describeType <- describeTypes) {
@@ -320,18 +287,18 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       TestUtils.waitUntilTrue(() => {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         output.trim.split("\n").length == 2 && error.isEmpty
-      }, s"Expected describe group results with one data row for describe type '${describeType.mkString(" ")}'")
+      }, s"Expected describe group results with one data row for describe type '${describeType.mkString(" ")}'", maxRetries = 3)
 
       // stop the consumer so the group has no active member anymore
       executor.shutdown()
       TestUtils.waitUntilTrue(() => {
         TestUtils.grabConsoleError(service.describeGroups()).contains(s"Consumer group '$group' has no active members.")
-      }, s"Expected no active member in describe group results with describe type ${describeType.mkString(" ")}")
+      }, s"Expected no active member in describe group results with describe type ${describeType.mkString(" ")}", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeOffsetsOfExistingGroupWithNoMembers(): Unit = {
+  def testDescribeOffsetsOfExistingGroupWithNoMembers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -343,7 +310,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val (state, assignments) = service.collectGroupOffsets(group)
       state.contains("Stable") && assignments.exists(_.exists(_.group == group))
-    }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.")
+    }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.", maxRetries = 3)
 
     // stop the consumer so the group has no active member anymore
     executor.shutdown()
@@ -359,11 +326,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
           assignment.host.exists(_.trim == ConsumerGroupCommand.MISSING_COLUMN_VALUE)
     }
     val (state, assignments) = result
-    assertTrue(succeeded, s"Expected no active member in describe group results, state: $state, assignments: $assignments")
+    assertTrue(s"Expected no active member in describe group results, state: $state, assignments: $assignments",
+      succeeded)
   }
 
   @Test
-  def testDescribeMembersOfExistingGroupWithNoMembers(): Unit = {
+  def testDescribeMembersOfExistingGroupWithNoMembers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -375,7 +343,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val (state, assignments) = service.collectGroupMembers(group, false)
       state.contains("Stable") && assignments.exists(_.exists(_.group == group))
-    }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.")
+    }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.", maxRetries = 3)
 
     // stop the consumer so the group has no active member anymore
     executor.shutdown()
@@ -383,11 +351,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val (state, assignments) = service.collectGroupMembers(group, false)
       state.contains("Empty") && assignments.isDefined && assignments.get.isEmpty
-    }, s"Expected no member in describe group members results for group '$group'")
+    }, s"Expected no member in describe group members results for group '$group'", maxRetries = 3)
   }
 
   @Test
-  def testDescribeStateOfExistingGroupWithNoMembers(): Unit = {
+  def testDescribeStateOfExistingGroupWithNoMembers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
@@ -402,7 +370,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         state.numMembers == 1 &&
         state.coordinator != null &&
         servers.map(_.config.brokerId).toList.contains(state.coordinator.id)
-    }, s"Expected the group '$group' to initially become stable, and have a single member.")
+    }, s"Expected the group '$group' to initially become stable, and have a single member.", maxRetries = 3)
 
     // stop the consumer so the group has no active member anymore
     executor.shutdown()
@@ -410,11 +378,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val state = service.collectGroupState(group)
       state.state == "Empty" && state.numMembers == 0 && state.assignmentStrategy == ""
-    }, s"Expected the group '$group' to become empty after the only member leaving.")
+    }, s"Expected the group '$group' to become empty after the only member leaving.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeWithConsumersWithoutAssignedPartitions(): Unit = {
+  def testDescribeWithConsumersWithoutAssignedPartitions() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     for (describeType <- describeTypes) {
@@ -428,12 +396,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         val expectedNumRows = if (describeTypeMembers.contains(describeType)) 3 else 2
         error.isEmpty && output.trim.split("\n").size == expectedNumRows
-      }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'")
+      }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeOffsetsWithConsumersWithoutAssignedPartitions(): Unit = {
+  def testDescribeOffsetsWithConsumersWithoutAssignedPartitions() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run two consumers in the group consuming from a single-partition topic
@@ -448,11 +416,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 1 &&
         assignments.get.count { x => x.group == group && x.partition.isDefined } == 1
-    }, "Expected rows for consumers with no assigned partitions in describe group results")
+    }, "Expected rows for consumers with no assigned partitions in describe group results", maxRetries = 3)
   }
 
   @Test
-  def testDescribeMembersWithConsumersWithoutAssignedPartitions(): Unit = {
+  def testDescribeMembersWithConsumersWithoutAssignedPartitions() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run two consumers in the group consuming from a single-partition topic
@@ -469,15 +437,15 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.count { x => x.group == group && x.numPartitions == 1 } == 1 &&
         assignments.get.count { x => x.group == group && x.numPartitions == 0 } == 1 &&
         assignments.get.count(_.assignment.nonEmpty) == 0
-    }, "Expected rows for consumers with no assigned partitions in describe group results")
+    }, "Expected rows for consumers with no assigned partitions in describe group results", maxRetries = 3)
 
     val (state, assignments) = service.collectGroupMembers(group, true)
-    assertTrue(state.contains("Stable") && assignments.get.count(_.assignment.nonEmpty) > 0,
-      "Expected additional columns in verbose version of describe members")
+    assertTrue("Expected additional columns in verbose version of describe members",
+        state.contains("Stable") && assignments.get.count(_.assignment.nonEmpty) > 0)
   }
 
   @Test
-  def testDescribeStateWithConsumersWithoutAssignedPartitions(): Unit = {
+  def testDescribeStateWithConsumersWithoutAssignedPartitions() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run two consumers in the group consuming from a single-partition topic
@@ -489,11 +457,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val state = service.collectGroupState(group)
       state.state == "Stable" && state.numMembers == 2
-    }, "Expected two consumers in describe group results")
+    }, "Expected two consumers in describe group results", maxRetries = 3)
   }
 
   @Test
-  def testDescribeWithMultiPartitionTopicAndMultipleConsumers(): Unit = {
+  def testDescribeWithMultiPartitionTopicAndMultipleConsumers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
     val topic2 = "foo2"
     createTopic(topic2, 2, 1)
@@ -509,12 +477,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
         val expectedNumRows = if (describeTypeState.contains(describeType)) 2 else 3
         error.isEmpty && output.trim.split("\n").size == expectedNumRows
-      }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'")
+      }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'", maxRetries = 3)
     }
   }
 
   @Test
-  def testDescribeOffsetsWithMultiPartitionTopicAndMultipleConsumers(): Unit = {
+  def testDescribeOffsetsWithMultiPartitionTopicAndMultipleConsumers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
     val topic2 = "foo2"
     createTopic(topic2, 2, 1)
@@ -532,11 +500,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.count(_.group == group) == 2 &&
         assignments.get.count{ x => x.group == group && x.partition.isDefined} == 2 &&
         assignments.get.count{ x => x.group == group && x.partition.isEmpty} == 0
-    }, "Expected two rows (one row per consumer) in describe group results.")
+    }, "Expected two rows (one row per consumer) in describe group results.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeMembersWithMultiPartitionTopicAndMultipleConsumers(): Unit = {
+  def testDescribeMembersWithMultiPartitionTopicAndMultipleConsumers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
     val topic2 = "foo2"
     createTopic(topic2, 2, 1)
@@ -554,15 +522,15 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.count(_.group == group) == 2 &&
         assignments.get.count{ x => x.group == group && x.numPartitions == 1 } == 2 &&
         assignments.get.count{ x => x.group == group && x.numPartitions == 0 } == 0
-    }, "Expected two rows (one row per consumer) in describe group members results.")
+    }, "Expected two rows (one row per consumer) in describe group members results.", maxRetries = 3)
 
     val (state, assignments) = service.collectGroupMembers(group, true)
-    assertTrue(state.contains("Stable") && assignments.get.count(_.assignment.isEmpty) == 0,
-      "Expected additional columns in verbose version of describe members")
+    assertTrue("Expected additional columns in verbose version of describe members",
+        state.contains("Stable") && assignments.get.count(_.assignment.isEmpty) == 0)
   }
 
   @Test
-  def testDescribeStateWithMultiPartitionTopicAndMultipleConsumers(): Unit = {
+  def testDescribeStateWithMultiPartitionTopicAndMultipleConsumers() {
     TestUtils.createOffsetsTopic(zkClient, servers)
     val topic2 = "foo2"
     createTopic(topic2, 2, 1)
@@ -576,11 +544,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val state = service.collectGroupState(group)
       state.state == "Stable" && state.group == group && state.numMembers == 2
-    }, "Expected a stable group with two members in describe group state result.")
+    }, "Expected a stable group with two members in describe group state result.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeSimpleConsumerGroup(): Unit = {
+  def testDescribeSimpleConsumerGroup() {
     // Ensure that the offsets of consumers which don't use group management are still displayed
 
     TestUtils.createOffsetsTopic(zkClient, servers)
@@ -594,11 +562,11 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     TestUtils.waitUntilTrue(() => {
       val (state, assignments) = service.collectGroupOffsets(group)
       state.contains("Empty") && assignments.isDefined && assignments.get.count(_.group == group) == 2
-    }, "Expected a stable group with two members in describe group state result.")
+    }, "Expected a stable group with two members in describe group state result.", maxRetries = 3)
   }
 
   @Test
-  def testDescribeGroupWithShortInitializationTimeout(): Unit = {
+  def testDescribeGroupWithShortInitializationTimeout() {
     // Let creation of the offsets topic happen during group initialization to ensure that initialization doesn't
     // complete before the timeout expires
 
@@ -610,12 +578,16 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--timeout", "1", "--group", group) ++ describeType
     val service = getConsumerGroupService(cgcArgs)
 
-    val e = assertThrows(classOf[ExecutionException], () => TestUtils.grabConsoleOutputAndError(service.describeGroups()))
-    assertEquals(classOf[TimeoutException], e.getCause.getClass)
+    try {
+      TestUtils.grabConsoleOutputAndError(service.describeGroups())
+      fail(s"The consumer group command should have failed due to low initialization timeout (describe type: ${describeType.mkString(" ")})")
+    } catch {
+      case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
+    }
   }
 
   @Test
-  def testDescribeGroupOffsetsWithShortInitializationTimeout(): Unit = {
+  def testDescribeGroupOffsetsWithShortInitializationTimeout() {
     // Let creation of the offsets topic happen during group initialization to ensure that initialization doesn't
     // complete before the timeout expires
 
@@ -626,12 +598,16 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group, "--timeout", "1")
     val service = getConsumerGroupService(cgcArgs)
 
-    val e = assertThrows(classOf[ExecutionException], () => service.collectGroupOffsets(group))
-    assertEquals(classOf[TimeoutException], e.getCause.getClass)
+    try {
+      service.collectGroupOffsets(group)
+      fail("The consumer group command should fail due to low initialization timeout")
+    } catch {
+      case e : ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
+    }
   }
 
   @Test
-  def testDescribeGroupMembersWithShortInitializationTimeout(): Unit = {
+  def testDescribeGroupMembersWithShortInitializationTimeout() {
     // Let creation of the offsets topic happen during group initialization to ensure that initialization doesn't
     // complete before the timeout expires
 
@@ -642,14 +618,22 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group, "--timeout", "1")
     val service = getConsumerGroupService(cgcArgs)
 
-    var e = assertThrows(classOf[ExecutionException], () => service.collectGroupMembers(group, false))
-    assertEquals(classOf[TimeoutException], e.getCause.getClass)
-    e = assertThrows(classOf[ExecutionException], () => service.collectGroupMembers(group, true))
-    assertEquals(classOf[TimeoutException], e.getCause.getClass)
+    try {
+      service.collectGroupMembers(group, false)
+      fail("The consumer group command should fail due to low initialization timeout")
+    } catch {
+      case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException])// OK
+        try {
+          service.collectGroupMembers(group, true)
+          fail("The consumer group command should fail due to low initialization timeout (verbose)")
+        } catch {
+          case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
+        }
+    }
   }
 
   @Test
-  def testDescribeGroupStateWithShortInitializationTimeout(): Unit = {
+  def testDescribeGroupStateWithShortInitializationTimeout() {
     // Let creation of the offsets topic happen during group initialization to ensure that initialization doesn't
     // complete before the timeout expires
 
@@ -660,18 +644,23 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group, "--timeout", "1")
     val service = getConsumerGroupService(cgcArgs)
 
-    val e = assertThrows(classOf[ExecutionException], () => service.collectGroupState(group))
-    assertEquals(classOf[TimeoutException], e.getCause.getClass)
+    try {
+      service.collectGroupState(group)
+      fail("The consumer group command should fail due to low initialization timeout")
+    } catch {
+      case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
+    }
   }
 
-  @Test
-  def testDescribeWithUnrecognizedNewConsumerOption(): Unit = {
+  @Test(expected = classOf[joptsimple.OptionException])
+  def testDescribeWithUnrecognizedNewConsumerOption() {
     val cgcArgs = Array("--new-consumer", "--bootstrap-server", brokerList, "--describe", "--group", group)
-    assertThrows(classOf[joptsimple.OptionException], () => getConsumerGroupService(cgcArgs))
+    getConsumerGroupService(cgcArgs)
+    fail("Expected an error due to presence of unrecognized --new-consumer option")
   }
 
   @Test
-  def testDescribeNonOffsetCommitGroup(): Unit = {
+  def testDescribeNonOffsetCommitGroup() {
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     val customProps = new Properties

@@ -20,9 +20,7 @@ import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
 import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.utils.ConfigUtils;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -46,25 +44,16 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
             + "or value (<code>" + Value.class.getName() + "</code>).";
 
     interface ConfigName {
-        String EXCLUDE = "exclude";
-        String INCLUDE = "include";
-
-        // for backwards compatibility
-        String INCLUDE_ALIAS = "whitelist";
-        String EXCLUDE_ALIAS = "blacklist";
-
+        String BLACKLIST = "blacklist";
+        String WHITELIST = "whitelist";
         String RENAME = "renames";
     }
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(ConfigName.EXCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
-                    "Fields to exclude. This takes precedence over the fields to include.")
-            .define("blacklist", ConfigDef.Type.LIST, null, Importance.LOW,
-                    "Deprecated. Use " + ConfigName.EXCLUDE + " instead.")
-            .define(ConfigName.INCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
+            .define(ConfigName.BLACKLIST, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
+                    "Fields to exclude. This takes precedence over the whitelist.")
+            .define(ConfigName.WHITELIST, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
                     "Fields to include. If specified, only these fields will be used.")
-            .define("whitelist", ConfigDef.Type.LIST, null, Importance.LOW,
-                    "Deprecated. Use " + ConfigName.INCLUDE + " instead.")
             .define(ConfigName.RENAME, ConfigDef.Type.LIST, Collections.emptyList(), new ConfigDef.Validator() {
                 @SuppressWarnings("unchecked")
                 @Override
@@ -80,8 +69,8 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
 
     private static final String PURPOSE = "field replacement";
 
-    private List<String> exclude;
-    private List<String> include;
+    private List<String> blacklist;
+    private List<String> whitelist;
     private Map<String, String> renames;
     private Map<String, String> reverseRenames;
 
@@ -89,13 +78,9 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
 
     @Override
     public void configure(Map<String, ?> configs) {
-        final SimpleConfig config = new SimpleConfig(CONFIG_DEF, ConfigUtils.translateDeprecatedConfigs(configs, new String[][]{
-            {ConfigName.INCLUDE, "whitelist"},
-            {ConfigName.EXCLUDE, "blacklist"},
-        }));
-
-        exclude = config.getList(ConfigName.EXCLUDE);
-        include = config.getList(ConfigName.INCLUDE);
+        final SimpleConfig config = new SimpleConfig(CONFIG_DEF, configs);
+        blacklist = config.getList(ConfigName.BLACKLIST);
+        whitelist = config.getList(ConfigName.WHITELIST);
         renames = parseRenameMappings(config.getList(ConfigName.RENAME));
         reverseRenames = invert(renames);
 
@@ -123,7 +108,7 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
     }
 
     boolean filter(String fieldName) {
-        return !exclude.contains(fieldName) && (include.isEmpty() || include.contains(fieldName));
+        return !blacklist.contains(fieldName) && (whitelist.isEmpty() || whitelist.contains(fieldName));
     }
 
     String renamed(String fieldName) {

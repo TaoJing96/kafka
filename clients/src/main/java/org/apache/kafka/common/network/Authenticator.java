@@ -18,11 +18,11 @@ package org.apache.kafka.common.network;
 
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
-import org.apache.kafka.common.security.auth.KafkaPrincipalSerde;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Optional;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Authentication for Channel
@@ -51,11 +51,6 @@ public interface Authenticator extends Closeable {
      * Returns Principal using PrincipalBuilder
      */
     KafkaPrincipal principal();
-
-    /**
-     * Returns the serializer/deserializer interface for principal
-     */
-    Optional<KafkaPrincipalSerde> principalSerde();
 
     /**
      * returns true if authentication is complete otherwise returns false;
@@ -136,21 +131,19 @@ public interface Authenticator extends Closeable {
     }
 
     /**
-     * Return the next (always non-null but possibly empty) client-side
-     * {@link NetworkReceive} response that arrived during re-authentication that
-     * is unrelated to re-authentication, if any. These correspond to requests sent
+     * Return the (always non-null but possibly empty) client-side
+     * {@link NetworkReceive} responses that arrived during re-authentication that
+     * are unrelated to re-authentication, if any. These correspond to requests sent
      * prior to the beginning of re-authentication; the requests were made when the
      * channel was successfully authenticated, and the responses arrived during the
-     * re-authentication process. The response returned is removed from the authenticator's
-     * queue. Responses of requests sent after completion of re-authentication are
-     * processed only when the authenticator response queue is empty.
+     * re-authentication process.
      * 
      * @return the (always non-null but possibly empty) client-side
-     *         {@link NetworkReceive} response that arrived during
-     *         re-authentication that is unrelated to re-authentication, if any
+     *         {@link NetworkReceive} responses that arrived during
+     *         re-authentication that are unrelated to re-authentication, if any
      */
-    default Optional<NetworkReceive> pollResponseReceivedDuringReauthentication() {
-        return Optional.empty();
+    default List<NetworkReceive> getAndClearResponsesReceivedDuringReauthentication() {
+        return Collections.emptyList();
     }
     
     /**

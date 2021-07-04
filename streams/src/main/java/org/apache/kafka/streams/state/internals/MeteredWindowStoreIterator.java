@@ -57,11 +57,16 @@ class MeteredWindowStoreIterator<V> implements WindowStoreIterator<V> {
     }
 
     @Override
+    public void remove() {
+        iter.remove();
+    }
+
+    @Override
     public void close() {
         try {
             iter.close();
         } finally {
-            sensor.record(time.nanoseconds() - startNs);
+            metrics.recordLatency(this.sensor, this.startNs, time.nanoseconds());
         }
     }
 

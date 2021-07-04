@@ -75,9 +75,12 @@ public class MockConnector extends Connector {
 
             log.debug("Started MockConnector with failure delay of {} ms", delayMs);
             executor = Executors.newSingleThreadScheduledExecutor();
-            executor.schedule(() -> {
-                log.debug("Triggering connector failure");
-                context.raiseError(new RuntimeException());
+            executor.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    log.debug("Triggering connector failure");
+                    context.raiseError(new RuntimeException());
+                }
             }, delayMs, TimeUnit.MILLISECONDS);
         }
     }

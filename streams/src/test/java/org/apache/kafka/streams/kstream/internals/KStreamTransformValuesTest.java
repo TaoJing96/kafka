@@ -18,7 +18,6 @@ package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
@@ -27,11 +26,12 @@ import org.apache.kafka.streams.kstream.ValueTransformer;
 import org.apache.kafka.streams.kstream.ValueTransformerSupplier;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKey;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
+import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.internals.ForwardingDisabledProcessorContext;
-import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
-import org.apache.kafka.test.NoOpValueTransformerWithKeySupplier;
+import org.apache.kafka.test.SingletonNoOpValueTransformer;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
@@ -46,15 +46,15 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertArrayEquals;
 
 @RunWith(EasyMockRunner.class)
-@SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
 public class KStreamTransformValuesTest {
     private final String topicName = "topic";
     private final MockProcessorSupplier<Integer, Integer> supplier = new MockProcessorSupplier<>();
+    private final ConsumerRecordFactory<Integer, Integer> recordFactory =
+        new ConsumerRecordFactory<>(new IntegerSerializer(), new IntegerSerializer(), 0L);
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.Integer());
     @Mock(MockType.NICE)
     private ProcessorContext context;
 
-    @SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
     @Test
     public void testTransform() {
         final StreamsBuilder builder = new StreamsBuilder();
@@ -64,7 +64,7 @@ public class KStreamTransformValuesTest {
                 private int total = 0;
 
                 @Override
-                public void init(final ProcessorContext context) { }
+                public void init(final ProcessorContext context) {}
 
                 @Override
                 public Integer transform(final Number value) {
@@ -73,7 +73,7 @@ public class KStreamTransformValuesTest {
                 }
 
                 @Override
-                public void close() { }
+                public void close() {}
             };
 
         final int[] expectedKeys = {1, 10, 100, 1000};
@@ -84,20 +84,14 @@ public class KStreamTransformValuesTest {
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             for (final int expectedKey : expectedKeys) {
-                final TestInputTopic<Integer, Integer> inputTopic =
-                        driver.createInputTopic(topicName, new IntegerSerializer(), new IntegerSerializer());
-                inputTopic.pipeInput(expectedKey, expectedKey * 10, expectedKey / 2L);
+                driver.pipeInput(recordFactory.create(topicName, expectedKey, expectedKey * 10, expectedKey / 2L));
             }
         }
-        final KeyValueTimestamp[] expected = {new KeyValueTimestamp<>(1, 10, 0),
-            new KeyValueTimestamp<>(10, 110, 5),
-            new KeyValueTimestamp<>(100, 1110, 50),
-            new KeyValueTimestamp<>(1000, 11110, 500)};
+        final String[] expected = {"1:10 (ts: 0)", "10:110 (ts: 5)", "100:1110 (ts: 50)", "1000:11110 (ts: 500)"};
 
-        assertArrayEquals(expected, supplier.theCapturedProcessor().processed().toArray());
+        assertArrayEquals(expected, supplier.theCapturedProcessor().processed.toArray());
     }
 
-    @SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
     @Test
     public void testTransformWithKey() {
         final StreamsBuilder builder = new StreamsBuilder();
@@ -107,7 +101,7 @@ public class KStreamTransformValuesTest {
                 private int total = 0;
 
                 @Override
-                public void init(final ProcessorContext context) { }
+                public void init(final ProcessorContext context) {}
 
                 @Override
                 public Integer transform(final Integer readOnlyKey, final Number value) {
@@ -116,7 +110,7 @@ public class KStreamTransformValuesTest {
                 }
 
                 @Override
-                public void close() { }
+                public void close() {}
             };
 
         final int[] expectedKeys = {1, 10, 100, 1000};
@@ -126,26 +120,21 @@ public class KStreamTransformValuesTest {
         stream.transformValues(valueTransformerSupplier).process(supplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<Integer, Integer> inputTopic =
-                    driver.createInputTopic(topicName, new IntegerSerializer(), new IntegerSerializer());
             for (final int expectedKey : expectedKeys) {
-                inputTopic.pipeInput(expectedKey, expectedKey * 10, expectedKey / 2L);
+                driver.pipeInput(recordFactory.create(topicName, expectedKey, expectedKey * 10, expectedKey / 2L));
             }
         }
-        final KeyValueTimestamp[] expected = {new KeyValueTimestamp<>(1, 11, 0),
-            new KeyValueTimestamp<>(10, 121, 5),
-            new KeyValueTimestamp<>(100, 1221, 50),
-            new KeyValueTimestamp<>(1000, 12221, 500)};
+        final String[] expected = {"1:11 (ts: 0)", "10:121 (ts: 5)", "100:1221 (ts: 50)", "1000:12221 (ts: 500)"};
 
-        assertArrayEquals(expected, supplier.theCapturedProcessor().processed().toArray());
+        assertArrayEquals(expected, supplier.theCapturedProcessor().processed.toArray());
     }
 
     @SuppressWarnings("unchecked")
     @Test
     public void shouldInitializeTransformerWithForwardDisabledProcessorContext() {
-        final NoOpValueTransformerWithKeySupplier<String, String> transformer = new NoOpValueTransformerWithKeySupplier<>();
+        final SingletonNoOpValueTransformer<String, String> transformer = new SingletonNoOpValueTransformer<>();
         final KStreamTransformValues<String, String, String> transformValues = new KStreamTransformValues<>(transformer);
-        final org.apache.kafka.streams.processor.Processor<String, String> processor = transformValues.get();
+        final Processor<String, String> processor = transformValues.get();
 
         processor.init(context);
 

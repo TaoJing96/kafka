@@ -40,11 +40,6 @@ import java.util.Objects;
 public final class ForwardingDisabledProcessorContext implements ProcessorContext {
     private final ProcessorContext delegate;
 
-    private static final String EXPLANATION = "ProcessorContext#forward() is not supported from this context, "
-        + "as the framework must ensure the key is not changed (#forward allows changing the key on "
-        + "messages which are sent). Try another function, which doesn't allow the key to be changed "
-        + "(for example - #tranformValues).";
-
     public ForwardingDisabledProcessorContext(final ProcessorContext delegate) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
     }
@@ -86,8 +81,16 @@ public final class ForwardingDisabledProcessorContext implements ProcessorContex
     }
 
     @Override
-    public <S extends StateStore> S getStateStore(final String name) {
+    public StateStore getStateStore(final String name) {
         return delegate.getStateStore(name);
+    }
+
+    @Override
+    @Deprecated
+    public Cancellable schedule(final long intervalMs,
+                                final PunctuationType type,
+                                final Punctuator callback) {
+        return delegate.schedule(intervalMs, type, callback);
     }
 
     @Override
@@ -99,12 +102,24 @@ public final class ForwardingDisabledProcessorContext implements ProcessorContex
 
     @Override
     public <K, V> void forward(final K key, final V value) {
-        throw new StreamsException(EXPLANATION);
+        throw new StreamsException("ProcessorContext#forward() not supported.");
     }
 
     @Override
     public <K, V> void forward(final K key, final V value, final To to) {
-        throw new StreamsException(EXPLANATION);
+        throw new StreamsException("ProcessorContext#forward() not supported.");
+    }
+
+    @Override
+    @Deprecated
+    public <K, V> void forward(final K key, final V value, final int childIndex) {
+        throw new StreamsException("ProcessorContext#forward() not supported.");
+    }
+
+    @Override
+    @Deprecated
+    public <K, V> void forward(final K key, final V value, final String childName) {
+        throw new StreamsException("ProcessorContext#forward() not supported.");
     }
 
     @Override
@@ -145,15 +160,5 @@ public final class ForwardingDisabledProcessorContext implements ProcessorContex
     @Override
     public Map<String, Object> appConfigsWithPrefix(final String prefix) {
         return delegate.appConfigsWithPrefix(prefix);
-    }
-
-    @Override
-    public long currentSystemTimeMs() {
-        return delegate.currentSystemTimeMs();
-    }
-
-    @Override
-    public long currentStreamTimeMs() {
-        return delegate.currentStreamTimeMs();
     }
 }

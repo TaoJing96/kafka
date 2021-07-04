@@ -17,11 +17,9 @@
 
 package org.apache.kafka.connect.transforms;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Schema;
@@ -33,8 +31,8 @@ import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.data.Values;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
+import org.junit.After;
+import org.junit.Test;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -42,10 +40,9 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class CastTest {
     private final Cast<SourceRecord> xformKey = new Cast.Key<>();
@@ -53,76 +50,40 @@ public class CastTest {
     private static final long MILLIS_PER_HOUR = TimeUnit.HOURS.toMillis(1);
     private static final long MILLIS_PER_DAY = TimeUnit.DAYS.toMillis(1);
 
-    @AfterEach
+    @After
     public void teardown() {
         xformKey.close();
         xformValue.close();
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testConfigEmpty() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "")));
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, ""));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testConfigInvalidSchemaType() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:faketype")));
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:faketype"));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testConfigInvalidTargetType() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:array")));
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:array"));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testUnsupportedTargetType() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:bytes")));
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:bytes"));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testConfigInvalidMap() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra")));
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra"));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testConfigMixWholeAndFieldTransformation() {
-        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32")));
-    }
-
-    @Test
-    public void castNullValueRecordWithSchema() {
-        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
-        SourceRecord original = new SourceRecord(null, null, "topic", 0,
-            Schema.STRING_SCHEMA, "key", Schema.STRING_SCHEMA, null);
-        SourceRecord transformed = xformValue.apply(original);
-        assertEquals(original, transformed);
-    }
-
-    @Test
-    public void castNullValueRecordSchemaless() {
-        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
-        SourceRecord original = new SourceRecord(null, null, "topic", 0,
-            Schema.STRING_SCHEMA, "key", null, null);
-        SourceRecord transformed = xformValue.apply(original);
-        assertEquals(original, transformed);
-    }
-
-    @Test
-    public void castNullKeyRecordWithSchema() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
-        SourceRecord original = new SourceRecord(null, null, "topic", 0,
-            Schema.STRING_SCHEMA, null, Schema.STRING_SCHEMA, "value");
-        SourceRecord transformed = xformKey.apply(original);
-        assertEquals(original, transformed);
-    }
-
-    @Test
-    public void castNullKeyRecordSchemaless() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
-        SourceRecord original = new SourceRecord(null, null, "topic", 0,
-            null, null, Schema.STRING_SCHEMA, "value");
-        SourceRecord transformed = xformKey.apply(original);
-        assertEquals(original, transformed);
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32"));
     }
 
     @Test
@@ -359,12 +320,10 @@ public class CastTest {
         assertEquals("42", transformed.value());
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void castWholeRecordValueSchemalessUnsupportedType() {
         xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8"));
-        assertThrows(DataException.class,
-            () -> xformValue.apply(new SourceRecord(null, null, "topic", 0,
-                    null, Collections.singletonList("foo"))));
+        xformValue.apply(new SourceRecord(null, null, "topic", 0, null, Collections.singletonList("foo")));
     }
 
     @Test
@@ -462,11 +421,7 @@ public class CastTest {
     @Test
     public void castFieldsWithSchema() {
         Date day = new Date(MILLIS_PER_DAY);
-        byte[] byteArray = new byte[] {(byte) 0xFE, (byte) 0xDC, (byte) 0xBA, (byte) 0x98, 0x76, 0x54, 0x32, 0x10};
-        ByteBuffer byteBuffer = ByteBuffer.wrap(Arrays.copyOf(byteArray, byteArray.length));
-
-        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG,
-                "int8:int16,int16:int32,int32:int64,int64:boolean,float32:float64,float64:boolean,boolean:int8,string:int32,bigdecimal:string,date:string,optional:int32,bytes:string,byteArray:string"));
+        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8:int16,int16:int32,int32:int64,int64:boolean,float32:float64,float64:boolean,boolean:int8,string:int32,bigdecimal:string,date:string,optional:int32"));
 
         // Include an optional fields and fields with defaults to validate their values are passed through properly
         SchemaBuilder builder = SchemaBuilder.struct();
@@ -483,9 +438,6 @@ public class CastTest {
         builder.field("date", org.apache.kafka.connect.data.Date.SCHEMA);
         builder.field("optional", Schema.OPTIONAL_FLOAT32_SCHEMA);
         builder.field("timestamp", Timestamp.SCHEMA);
-        builder.field("bytes", Schema.BYTES_SCHEMA);
-        builder.field("byteArray", Schema.BYTES_SCHEMA);
-
         Schema supportedTypesSchema = builder.build();
 
         Struct recordValue = new Struct(supportedTypesSchema);
@@ -500,9 +452,6 @@ public class CastTest {
         recordValue.put("date", day);
         recordValue.put("string", "42");
         recordValue.put("timestamp", new Date(0));
-        recordValue.put("bytes", byteBuffer);
-        recordValue.put("byteArray", byteArray);
-
         // optional field intentionally omitted
 
         SourceRecord transformed = xformValue.apply(new SourceRecord(null, null, "topic", 0,
@@ -522,9 +471,6 @@ public class CastTest {
         assertEquals("42", ((Struct) transformed.value()).get("bigdecimal"));
         assertEquals(Values.dateFormatFor(day).format(day), ((Struct) transformed.value()).get("date"));
         assertEquals(new Date(0), ((Struct) transformed.value()).get("timestamp"));
-        assertEquals("/ty6mHZUMhA=", ((Struct) transformed.value()).get("bytes"));
-        assertEquals("/ty6mHZUMhA=", ((Struct) transformed.value()).get("byteArray"));
-
         assertNull(((Struct) transformed.value()).get("optional"));
 
         Schema transformedSchema = ((Struct) transformed.value()).schema();
@@ -539,9 +485,6 @@ public class CastTest {
         assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("bigdecimal").schema().type());
         assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("date").schema().type());
         assertEquals(Schema.OPTIONAL_INT32_SCHEMA.type(), transformedSchema.field("optional").schema().type());
-        assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("bytes").schema().type());
-        assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("byteArray").schema().type());
-
         // The following fields are not changed
         assertEquals(Timestamp.SCHEMA.type(), transformedSchema.field("timestamp").schema().type());
     }

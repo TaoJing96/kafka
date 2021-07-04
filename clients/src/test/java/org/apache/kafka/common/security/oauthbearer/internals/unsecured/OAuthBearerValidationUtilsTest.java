@@ -16,7 +16,7 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -25,7 +25,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.kafka.common.utils.Time;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 public class OAuthBearerValidationUtilsTest {
     private static final String QUOTE = "\"";
@@ -81,15 +81,16 @@ public class OAuthBearerValidationUtilsTest {
                         OAuthBearerValidationResult result = OAuthBearerValidationUtils.validateIssuedAt(testJwt,
                                 required, whenCheckMs, allowableClockSkewMs);
                         if (required && !exists)
-                            assertTrue(isFailureWithMessageAndNoFailureScope(result), "useErrorValue || required && !exists");
+                            assertTrue("useErrorValue || required && !exists",
+                                    isFailureWithMessageAndNoFailureScope(result));
                         else if (!required && !exists)
-                            assertTrue(isSuccess(result), "!required && !exists");
+                            assertTrue("!required && !exists", isSuccess(result));
                         else if (nowClaimValue * 1000 > whenCheckMs + allowableClockSkewMs) // issued in future
-                            assertTrue(isFailureWithMessageAndNoFailureScope(result),
-                                assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs));
+                            assertTrue(assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs),
+                                    isFailureWithMessageAndNoFailureScope(result));
                         else
-                            assertTrue(isSuccess(result),
-                                assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs));
+                            assertTrue(assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs),
+                                    isSuccess(result));
                     }
                 }
             }
@@ -114,10 +115,11 @@ public class OAuthBearerValidationUtilsTest {
                 OAuthBearerValidationResult result = OAuthBearerValidationUtils.validateExpirationTime(testJwt,
                         whenCheckMs, allowableClockSkewMs);
                 if (whenCheckMs - allowableClockSkewMs >= nowClaimValue * 1000) // expired
-                    assertTrue(isFailureWithMessageAndNoFailureScope(result),
-                        assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs));
+                    assertTrue(assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs),
+                            isFailureWithMessageAndNoFailureScope(result));
                 else
-                    assertTrue(isSuccess(result), assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs));
+                    assertTrue(assertionFailureMessage(nowClaimValue, allowableClockSkewMs, whenCheckMs),
+                            isSuccess(result));
             }
         }
     }

@@ -24,8 +24,7 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.Utils;
 
 public class RecordHeader implements Header {
-    private ByteBuffer keyBuffer;
-    private String key;
+    private final String key;
     private ByteBuffer valueBuffer;
     private byte[] value;
 
@@ -35,16 +34,13 @@ public class RecordHeader implements Header {
         this.value = value;
     }
 
-    public RecordHeader(ByteBuffer keyBuffer, ByteBuffer valueBuffer) {
-        this.keyBuffer = Objects.requireNonNull(keyBuffer, "Null header keys are not permitted");
+    public RecordHeader(String key, ByteBuffer valueBuffer) {
+        Objects.requireNonNull(key, "Null header keys are not permitted");
+        this.key = key;
         this.valueBuffer = valueBuffer;
     }
     
     public String key() {
-        if (key == null) {
-            key = Utils.utf8(keyBuffer, keyBuffer.remaining());
-            keyBuffer = null;
-        }
         return key;
     }
 
@@ -64,20 +60,20 @@ public class RecordHeader implements Header {
             return false;
 
         RecordHeader header = (RecordHeader) o;
-        return Objects.equals(key(), header.key()) &&
+        return Objects.equals(key, header.key) &&
                Arrays.equals(value(), header.value());
     }
 
     @Override
     public int hashCode() {
-        int result = key().hashCode();
+        int result = key != null ? key.hashCode() : 0;
         result = 31 * result + Arrays.hashCode(value());
         return result;
     }
 
     @Override
     public String toString() {
-        return "RecordHeader(key = " + key() + ", value = " + Arrays.toString(value()) + ")";
+        return "RecordHeader(key = " + key + ", value = " + Arrays.toString(value()) + ")";
     }
 
 }

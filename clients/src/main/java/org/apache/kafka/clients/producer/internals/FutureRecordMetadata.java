@@ -30,18 +30,20 @@ import java.util.concurrent.TimeoutException;
 public final class FutureRecordMetadata implements Future<RecordMetadata> {
 
     private final ProduceRequestResult result;
-    private final int batchIndex;
+    private final long relativeOffset;
     private final long createTimestamp;
+    private final Long checksum;
     private final int serializedKeySize;
     private final int serializedValueSize;
     private final Time time;
     private volatile FutureRecordMetadata nextRecordMetadata = null;
 
-    public FutureRecordMetadata(ProduceRequestResult result, int batchIndex, long createTimestamp, int serializedKeySize,
-                                int serializedValueSize, Time time) {
+    public FutureRecordMetadata(ProduceRequestResult result, long relativeOffset, long createTimestamp,
+                                Long checksum, int serializedKeySize, int serializedValueSize, Time time) {
         this.result = result;
-        this.batchIndex = batchIndex;
+        this.relativeOffset = relativeOffset;
         this.createTimestamp = createTimestamp;
+        this.checksum = checksum;
         this.serializedKeySize = serializedKeySize;
         this.serializedValueSize = serializedValueSize;
         this.time = time;
@@ -92,18 +94,21 @@ public final class FutureRecordMetadata implements Future<RecordMetadata> {
     }
 
     RecordMetadata valueOrError() throws ExecutionException {
-        RuntimeException exception = this.result.error(batchIndex);
-        if (exception != null)
-            throw new ExecutionException(exception);
+        if (this.result.error() != null)
+            throw new ExecutionException(this.result.error());
         else
             return value();
+    }
+
+    Long checksumOrNull() {
+        return this.checksum;
     }
 
     RecordMetadata value() {
         if (nextRecordMetadata != null)
             return nextRecordMetadata.value();
-        return new RecordMetadata(result.topicPartition(), this.result.baseOffset(), this.batchIndex,
-                                  timestamp(), this.serializedKeySize, this.serializedValueSize);
+        return new RecordMetadata(result.topicPartition(), this.result.baseOffset(), this.relativeOffset,
+                                  timestamp(), this.checksum, this.serializedKeySize, this.serializedValueSize);
     }
 
     private long timestamp() {

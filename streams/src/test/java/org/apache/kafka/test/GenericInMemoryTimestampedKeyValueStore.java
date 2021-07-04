@@ -37,7 +37,6 @@ import java.util.TreeMap;
  * This class is a generic version of the in-memory key-value store that is useful for testing when you
  *  need a basic KeyValueStore for arbitrary types and don't have/want to write a serde
  */
-@SuppressWarnings("deprecation")
 public class GenericInMemoryTimestampedKeyValueStore<K extends Comparable, V>
     extends WrappedStateStore<StateStore, K, ValueAndTimestamp<V>>
     implements TimestampedKeyValueStore<K, V> {
@@ -60,8 +59,8 @@ public class GenericInMemoryTimestampedKeyValueStore<K extends Comparable, V>
         return this.name;
     }
 
-    @Deprecated
     @Override
+    @SuppressWarnings("unchecked")
     /* This is a "dummy" store used for testing;
        it does not support restoring from changelog since we allow it to be serde-ignorant */
     public void init(final ProcessorContext context, final StateStore root) {
@@ -171,6 +170,11 @@ public class GenericInMemoryTimestampedKeyValueStore<K extends Comparable, V>
         public KeyValue<K, ValueAndTimestamp<V>> next() {
             final Map.Entry<K, ValueAndTimestamp<V>> entry = iter.next();
             return new KeyValue<>(entry.getKey(), entry.getValue());
+        }
+
+        @Override
+        public void remove() {
+            iter.remove();
         }
 
         @Override

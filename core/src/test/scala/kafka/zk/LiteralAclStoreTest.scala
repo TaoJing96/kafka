@@ -18,22 +18,21 @@
 package kafka.zk
 
 import java.nio.charset.StandardCharsets.UTF_8
-import kafka.security.authorizer.AclEntry
+
+import kafka.security.auth.{Group, Resource, Topic}
 import org.apache.kafka.common.resource.PatternType.{LITERAL, PREFIXED}
-import org.apache.kafka.common.resource.ResourcePattern
-import org.apache.kafka.common.resource.ResourceType.{GROUP, TOPIC}
-import org.junit.jupiter.api.Assertions.{assertEquals, assertThrows}
-import org.junit.jupiter.api.Test
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class LiteralAclStoreTest {
-  private val literalResource = new ResourcePattern(TOPIC, "some-topic", LITERAL)
-  private val prefixedResource = new ResourcePattern(TOPIC, "some-topic", PREFIXED)
+  private val literalResource = Resource(Topic, "some-topic", LITERAL)
+  private val prefixedResource = Resource(Topic, "some-topic", PREFIXED)
   private val store = LiteralAclStore
 
   @Test
   def shouldHaveCorrectPaths(): Unit = {
     assertEquals("/kafka-acl", store.aclPath)
-    assertEquals("/kafka-acl/Topic", store.path(TOPIC))
+    assertEquals("/kafka-acl/Topic", store.path(Topic))
     assertEquals("/kafka-acl-changes", store.changeStore.aclChangePath)
   }
 
@@ -42,9 +41,9 @@ class LiteralAclStoreTest {
     assertEquals(LITERAL, store.patternType)
   }
 
-  @Test
+  @Test(expected = classOf[IllegalArgumentException])
   def shouldThrowFromEncodeOnNoneLiteral(): Unit = {
-    assertThrows(classOf[IllegalArgumentException], () => store.changeStore.createChangeNode(prefixedResource))
+    store.changeStore.createChangeNode(prefixedResource)
   }
 
   @Test
@@ -65,8 +64,8 @@ class LiteralAclStoreTest {
 
   @Test
   def shouldDecodeResourceUsingTwoPartLogic(): Unit = {
-    val resource = new ResourcePattern(GROUP, "PREFIXED:this, including the PREFIXED part, is a valid two part group name", LITERAL)
-    val encoded = (resource.resourceType.toString + AclEntry.ResourceSeparator + resource.name).getBytes(UTF_8)
+    val resource = Resource(Group, "PREFIXED:this, including the PREFIXED part, is a valid two part group name", LITERAL)
+    val encoded = (resource.resourceType +  Resource.Separator + resource.name).getBytes(UTF_8)
 
     val actual = store.changeStore.decode(encoded)
 

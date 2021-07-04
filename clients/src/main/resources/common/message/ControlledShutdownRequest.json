@@ -16,7 +16,6 @@
 {
   "apiKey": 7,
   "type": "request",
-  "listeners": ["zkBroker", "controller"],
   "name": "ControlledShutdownRequest",
   // Version 0 of ControlledShutdownRequest has a non-standard request header
   // which does not include clientId.  Version 1 and later use the standard
@@ -25,8 +24,7 @@
   // Version 1 is the same as version 0.
   //
   // Version 2 adds BrokerEpoch.
-  "validVersions": "0-3",
-  "flexibleVersions": "3+",
+  "validVersions": "0-2",
   "fields": [
     { "name": "BrokerId", "type": "int32", "versions": "0+", "entityType": "brokerId",
       "about": "The id of the broker for which controlled shutdown has been requested." },

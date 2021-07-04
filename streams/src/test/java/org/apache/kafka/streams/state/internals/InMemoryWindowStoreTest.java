@@ -16,10 +16,18 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import static java.time.Duration.ofMillis;
+import static org.apache.kafka.streams.state.internals.WindowKeySchema.toStoreKeyBinary;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+
+import java.util.LinkedList;
+import java.util.List;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.StateSerdes;
 import org.apache.kafka.streams.state.Stores;
@@ -27,24 +35,16 @@ import org.apache.kafka.streams.state.WindowStore;
 import org.apache.kafka.streams.state.WindowStoreIterator;
 import org.junit.Test;
 
-import java.util.LinkedList;
-import java.util.List;
-
-import static java.time.Duration.ofMillis;
-import static org.apache.kafka.streams.state.internals.WindowKeySchema.toStoreKeyBinary;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-
-public class InMemoryWindowStoreTest extends AbstractWindowBytesStoreTest {
+public class InMemoryWindowStoreTest extends WindowBytesStoreTest {
 
     private final static String STORE_NAME = "InMemoryWindowStore";
 
     @Override
     <K, V> WindowStore<K, V> buildWindowStore(final long retentionPeriod,
-                                              final long windowSize,
-                                              final boolean retainDuplicates,
-                                              final Serde<K> keySerde,
-                                              final Serde<V> valueSerde) {
+        final long windowSize,
+        final boolean retainDuplicates,
+        final Serde<K> keySerde,
+        final Serde<V> valueSerde) {
         return Stores.windowStoreBuilder(
             Stores.inMemoryWindowStore(
                 STORE_NAME,
@@ -56,7 +56,16 @@ public class InMemoryWindowStoreTest extends AbstractWindowBytesStoreTest {
             .build();
     }
 
-    @SuppressWarnings("unchecked")
+    @Override
+    String getMetricsScope() {
+        return new InMemoryWindowBytesStoreSupplier(null, 0, 0, false).metricsScope();
+    }
+
+    @Override
+    void setClassLoggerToDebug() {
+        LogCaptureAppender.setClassLoggerToDebug(InMemoryWindowStore.class);
+    }
+
     @Test
     public void shouldRestore() {
         // should be empty initially
@@ -119,27 +128,33 @@ public class InMemoryWindowStoreTest extends AbstractWindowBytesStoreTest {
     public void testExpiration() {
 
         long currentTime = 0;
-        windowStore.put(1, "one", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "one");
 
         currentTime += RETENTION_PERIOD / 4;
-        windowStore.put(1, "two", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "two");
 
         currentTime += RETENTION_PERIOD / 4;
-        windowStore.put(1, "three", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "three");
 
         currentTime += RETENTION_PERIOD / 4;
-        windowStore.put(1, "four", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "four");
 
         // increase current time to the full RETENTION_PERIOD to expire first record
         currentTime = currentTime + RETENTION_PERIOD / 4;
-        windowStore.put(1, "five", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "five");
 
         KeyValueIterator<Windowed<Integer>, String> iterator = windowStore
             .fetchAll(0L, currentTime);
 
         // effect of this put (expires next oldest record, adds new one) should not be reflected in the already fetched results
         currentTime = currentTime + RETENTION_PERIOD / 4;
-        windowStore.put(1, "six", currentTime);
+        setCurrentTime(currentTime);
+        windowStore.put(1, "six");
 
         // should only have middle 4 values, as (only) the first record was expired at the time of the fetch
         // and the last was inserted after the fetch
@@ -158,5 +173,5 @@ public class InMemoryWindowStoreTest extends AbstractWindowBytesStoreTest {
         assertEquals(windowedPair(1, "six", 5 * (RETENTION_PERIOD / 4)), iterator.next());
         assertFalse(iterator.hasNext());
     }
-
+    
 }

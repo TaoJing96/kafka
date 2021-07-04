@@ -21,6 +21,7 @@ from kafkatest.services.kafka import TopicPartition
 from kafkatest.services.verifiable_consumer import VerifiableConsumer
 
 
+
 class TruncationTest(VerifiableConsumerTest):
     TOPIC = "test_topic"
     NUM_PARTITIONS = 1

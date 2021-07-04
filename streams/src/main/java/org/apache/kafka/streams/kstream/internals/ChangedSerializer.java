@@ -19,11 +19,10 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.processor.internals.SerdeGetter;
 
 import java.nio.ByteBuffer;
 
-public class ChangedSerializer<T> implements Serializer<Change<T>>, WrappingNullableSerializer<Change<T>, Void, T> {
+public class ChangedSerializer<T> implements Serializer<Change<T>> {
 
     private static final int NEWFLAG_SIZE = 1;
 
@@ -37,12 +36,8 @@ public class ChangedSerializer<T> implements Serializer<Change<T>>, WrappingNull
         return inner;
     }
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public void setIfUnset(final SerdeGetter getter) {
-        if (inner == null) {
-            inner = (Serializer<T>) getter.valueSerde().serializer();
-        }
+    public void setInner(final Serializer<T> inner) {
+        this.inner = inner;
     }
 
     /**

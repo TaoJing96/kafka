@@ -17,9 +17,7 @@
 
 package org.apache.kafka.common.protocol;
 
-import org.apache.kafka.common.protocol.types.RawTaggedField;
-
-import java.util.List;
+import org.apache.kafka.common.protocol.types.Struct;
 
 /**
  * An object that can serialize itself.  The serialization protocol is versioned.
@@ -39,44 +37,28 @@ public interface Message {
     /**
      * Returns the number of bytes it would take to write out this message.
      *
-     * @param cache         The serialization size cache to populate.
      * @param version       The version to use.
      *
      * @throws {@see org.apache.kafka.common.errors.UnsupportedVersionException}
      *                      If the specified version is too new to be supported
      *                      by this software.
      */
-    default int size(ObjectSerializationCache cache, short version) {
-        MessageSizeAccumulator size = new MessageSizeAccumulator();
-        addSize(size, cache, version);
-        return size.totalSize();
-    }
+    int size(short version);
 
     /**
-     * Add the size of this message to an accumulator.
-     *
-     * @param size          The size accumulator to add to
-     * @param cache         The serialization size cache to populate.
-     * @param version       The version to use.
-     */
-    void addSize(MessageSizeAccumulator size, ObjectSerializationCache cache, short version);
-
-    /**
-     * Writes out this message to the given Writable.
+     * Writes out this message to the given ByteBuffer.
      *
      * @param writable      The destination writable.
-     * @param cache         The object serialization cache to use.  You must have
-     *                      previously populated the size cache using #{Message#size()}.
      * @param version       The version to use.
      *
      * @throws {@see org.apache.kafka.common.errors.UnsupportedVersionException}
      *                      If the specified version is too new to be supported
      *                      by this software.
      */
-    void write(Writable writable, ObjectSerializationCache cache, short version);
+    void write(Writable writable, short version);
 
     /**
-     * Reads this message from the given Readable.  This will overwrite all
+     * Reads this message from the given ByteBuffer.  This will overwrite all
      * relevant fields with information from the byte buffer.
      *
      * @param readable      The source readable.
@@ -89,16 +71,22 @@ public interface Message {
     void read(Readable readable, short version);
 
     /**
-     * Returns a list of tagged fields which this software can't understand.
+     * Reads this message from the a Struct object.  This will overwrite all
+     * relevant fields with information from the Struct.
      *
-     * @return              The raw tagged fields.
+     * @param struct        The source struct.
+     * @param version       The version to use.
      */
-    List<RawTaggedField> unknownTaggedFields();
+    void fromStruct(Struct struct, short version);
 
     /**
-     * Make a deep copy of the message.
+     * Writes out this message to a Struct.
      *
-     * @return              A copy of the message which does not share any mutable fields.
+     * @param version       The version to use.
+     *
+     * @throws {@see org.apache.kafka.common.errors.UnsupportedVersionException}
+     *                      If the specified version is too new to be supported
+     *                      by this software.
      */
-    Message duplicate();
+    Struct toStruct(short version);
 }

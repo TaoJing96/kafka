@@ -19,6 +19,7 @@
 import java.util.Properties
 
 import joptsimple.{OptionParser, OptionSet, OptionSpec}
+import org.apache.kafka.common.utils.AppInfoParser
 
 import scala.collection.Set
 
@@ -62,7 +63,7 @@ object CommandLineUtils extends Logging {
   /**
    * Check that all the listed options are present
    */
-  def checkRequiredArgs(parser: OptionParser, options: OptionSet, required: OptionSpec[_]*): Unit = {
+  def checkRequiredArgs(parser: OptionParser, options: OptionSet, required: OptionSpec[_]*) {
     for (arg <- required) {
       if (!options.has(arg))
         printUsageAndDie(parser, "Missing required argument \"" + arg + "\"")
@@ -72,7 +73,7 @@ object CommandLineUtils extends Logging {
   /**
    * Check that none of the listed options are present
    */
-  def checkInvalidArgs(parser: OptionParser, options: OptionSet, usedOption: OptionSpec[_], invalidOptions: Set[OptionSpec[_]]): Unit = {
+  def checkInvalidArgs(parser: OptionParser, options: OptionSet, usedOption: OptionSpec[_], invalidOptions: Set[OptionSpec[_]]) {
     if (options.has(usedOption)) {
       for (arg <- invalidOptions) {
         if (options.has(arg))
@@ -84,12 +85,11 @@ object CommandLineUtils extends Logging {
   /**
     * Check that none of the listed options are present with the combination of used options
     */
-  def checkInvalidArgsSet(parser: OptionParser, options: OptionSet, usedOptions: Set[OptionSpec[_]], invalidOptions: Set[OptionSpec[_]],
-                         trailingAdditionalMessage: Option[String] = None): Unit = {
+  def checkInvalidArgsSet(parser: OptionParser, options: OptionSet, usedOptions: Set[OptionSpec[_]], invalidOptions: Set[OptionSpec[_]]) {
     if (usedOptions.count(options.has) == usedOptions.size) {
       for (arg <- invalidOptions) {
         if (options.has(arg))
-          printUsageAndDie(parser, "Option combination \"" + usedOptions.mkString(",") + "\" can't be used with option \"" + arg + "\"" + trailingAdditionalMessage.getOrElse(""))
+          printUsageAndDie(parser, "Option combination \"" + usedOptions.mkString(",") + "\" can't be used with option \"" + arg + "\"")
       }
     }
   }
@@ -133,7 +133,7 @@ object CommandLineUtils extends Logging {
     * 3) otherwise, use the default value of {@code spec}.
     * A {@code null} value means to remove {@code key} from the {@code props}.
     */
-  def maybeMergeOptions[V](props: Properties, key: String, options: OptionSet, spec: OptionSpec[V]): Unit = {
+  def maybeMergeOptions[V](props: Properties, key: String, options: OptionSet, spec: OptionSpec[V]) {
     if (options.has(spec) || !props.containsKey(key)) {
       val value = options.valueOf(spec)
       if (value == null)

@@ -16,12 +16,9 @@
 {
   "apiKey": 33,
   "type": "request",
-  "listeners": ["zkBroker"],
   "name": "AlterConfigsRequest",
   // Version 1 is the same as version 0.
-  // Version 2 enables flexible versions.
-  "validVersions": "0-2",
-  "flexibleVersions": "2+",
+  "validVersions": "0-1",
   "fields": [
     { "name": "Resources", "type": "[]AlterConfigsResource", "versions": "0+", 
       "about": "The updates for each resource.", "fields": [

@@ -16,129 +16,75 @@
  */
 package kafka.coordinator.transaction
 
-import kafka.server.BrokerToControllerChannelManager
-import kafka.zk.{KafkaZkClient, ProducerIdBlockZNode}
+import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.KafkaException
-import org.apache.kafka.common.message.AllocateProducerIdsResponseData
-import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.requests.AllocateProducerIdsResponse
-import org.apache.kafka.server.common.ProducerIdsBlock
-import org.easymock.{Capture, EasyMock}
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.{EnumSource, ValueSource}
-
-import java.util.stream.IntStream
+import org.easymock.{Capture, EasyMock, IAnswer}
+import org.junit.{After, Test}
+import org.junit.Assert._
 
 class ProducerIdManagerTest {
 
-  var brokerToController: BrokerToControllerChannelManager = EasyMock.niceMock(classOf[BrokerToControllerChannelManager])
-  val zkClient: KafkaZkClient = EasyMock.createNiceMock(classOf[KafkaZkClient])
+  private val zkClient: KafkaZkClient = EasyMock.createNiceMock(classOf[KafkaZkClient])
 
-  // Mutable test implementation that lets us easily set the idStart and error
-  class MockProducerIdManager(val brokerId: Int, var idStart: Long, val idLen: Int, var error: Errors = Errors.NONE)
-    extends RPCProducerIdManager(brokerId, () => 1, brokerToController, 100) {
-
-    override private[transaction] def sendRequest(): Unit = {
-      if (error == Errors.NONE) {
-        handleAllocateProducerIdsResponse(new AllocateProducerIdsResponse(
-          new AllocateProducerIdsResponseData().setProducerIdStart(idStart).setProducerIdLen(idLen)))
-        idStart += idLen
-      } else {
-        handleAllocateProducerIdsResponse(new AllocateProducerIdsResponse(
-          new AllocateProducerIdsResponseData().setErrorCode(error.code)))
-      }
-    }
+  @After
+  def tearDown(): Unit = {
+    EasyMock.reset(zkClient)
   }
 
   @Test
-  def testGetProducerIdZk(): Unit = {
+  def testGetProducerId() {
     var zkVersion: Option[Int] = None
     var data: Array[Byte] = null
-    EasyMock.expect(zkClient.getDataAndVersion(EasyMock.anyString)).andAnswer(() =>
-      zkVersion.map(Some(data) -> _).getOrElse(None, 0)).anyTimes()
+    EasyMock.expect(zkClient.getDataAndVersion(EasyMock.anyString)).andAnswer(new IAnswer[(Option[Array[Byte]], Int)] {
+      override def answer(): (Option[Array[Byte]], Int) = zkVersion.map(Some(data) -> _).getOrElse(None, 0)
+    }).anyTimes()
 
     val capturedVersion: Capture[Int] = EasyMock.newCapture()
     val capturedData: Capture[Array[Byte]] = EasyMock.newCapture()
     EasyMock.expect(zkClient.conditionalUpdatePath(EasyMock.anyString(),
       EasyMock.capture(capturedData),
       EasyMock.capture(capturedVersion),
-      EasyMock.anyObject[Option[(KafkaZkClient, String, Array[Byte]) => (Boolean, Int)]])
-    ).andAnswer(() => {
-      val newZkVersion = capturedVersion.getValue + 1
-      zkVersion = Some(newZkVersion)
-      data = capturedData.getValue
-      (true, newZkVersion)
-    }).anyTimes()
+      EasyMock.anyObject[Option[(KafkaZkClient, String, Array[Byte]) => (Boolean, Int)]])).andAnswer(new IAnswer[(Boolean, Int)] {
+        override def answer(): (Boolean, Int) = {
+          val newZkVersion = capturedVersion.getValue + 1
+          zkVersion = Some(newZkVersion)
+          data = capturedData.getValue
+          (true, newZkVersion)
+        }
+      }).anyTimes()
 
     EasyMock.replay(zkClient)
 
-    val manager1 = new ZkProducerIdManager(0, zkClient)
-    val manager2 = new ZkProducerIdManager(1, zkClient)
+    val manager1 = new ProducerIdManager(0, zkClient)
+    val manager2 = new ProducerIdManager(1, zkClient)
 
     val pid1 = manager1.generateProducerId()
     val pid2 = manager2.generateProducerId()
 
     assertEquals(0, pid1)
-    assertEquals(ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE, pid2)
+    assertEquals(ProducerIdManager.PidBlockSize, pid2)
 
-    for (i <- 1L until ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE)
+    for (i <- 1L until ProducerIdManager.PidBlockSize)
       assertEquals(pid1 + i, manager1.generateProducerId())
 
-    for (i <- 1L until ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE)
+    for (i <- 1L until ProducerIdManager.PidBlockSize)
       assertEquals(pid2 + i, manager2.generateProducerId())
 
-    assertEquals(pid2 + ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE, manager1.generateProducerId())
-    assertEquals(pid2 + ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE * 2, manager2.generateProducerId())
-
-    EasyMock.reset(zkClient)
+    assertEquals(pid2 + ProducerIdManager.PidBlockSize, manager1.generateProducerId())
+    assertEquals(pid2 + ProducerIdManager.PidBlockSize * 2, manager2.generateProducerId())
   }
 
-  @Test
-  def testExceedProducerIdLimitZk(): Unit = {
-    EasyMock.expect(zkClient.getDataAndVersion(EasyMock.anyString)).andAnswer(() => {
-      val json = ProducerIdBlockZNode.generateProducerIdBlockJson(
-        new ProducerIdsBlock(0, Long.MaxValue - ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE, ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE))
-      (Some(json), 0)
+  @Test(expected = classOf[KafkaException])
+  def testExceedProducerIdLimit() {
+    EasyMock.expect(zkClient.getDataAndVersion(EasyMock.anyString)).andAnswer(new IAnswer[(Option[Array[Byte]], Int)] {
+      override def answer(): (Option[Array[Byte]], Int) = {
+        val json = ProducerIdManager.generateProducerIdBlockJson(
+          ProducerIdBlock(0, Long.MaxValue - ProducerIdManager.PidBlockSize, Long.MaxValue))
+        (Some(json), 0)
+      }
     }).anyTimes()
     EasyMock.replay(zkClient)
-    assertThrows(classOf[KafkaException], () => new ZkProducerIdManager(0, zkClient))
-  }
-
-  @ParameterizedTest
-  @ValueSource(ints = Array(1, 2, 10))
-  def testContiguousIds(idBlockLen: Int): Unit = {
-    val manager = new MockProducerIdManager(0, 0, idBlockLen)
-
-    IntStream.range(0, idBlockLen * 3).forEach { i =>
-      assertEquals(i, manager.generateProducerId())
-    }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = classOf[Errors], names = Array("UNKNOWN_SERVER_ERROR", "INVALID_REQUEST"))
-  def testUnrecoverableErrors(error: Errors): Unit = {
-    val manager = new MockProducerIdManager(0, 0, 1)
-    assertEquals(0, manager.generateProducerId())
-
-    manager.error = error
-    assertThrows(classOf[Throwable], () => manager.generateProducerId())
-
-    manager.error = Errors.NONE
-    assertEquals(1, manager.generateProducerId())
-  }
-
-  @Test
-  def testInvalidRanges(): Unit = {
-    var manager = new MockProducerIdManager(0, -1, 10)
-    assertThrows(classOf[KafkaException], () => manager.generateProducerId())
-
-    manager = new MockProducerIdManager(0, 0, -1)
-    assertThrows(classOf[KafkaException], () => manager.generateProducerId())
-
-    manager = new MockProducerIdManager(0, Long.MaxValue-1, 10)
-    assertThrows(classOf[KafkaException], () => manager.generateProducerId())
+    new ProducerIdManager(0, zkClient)
   }
 }
 

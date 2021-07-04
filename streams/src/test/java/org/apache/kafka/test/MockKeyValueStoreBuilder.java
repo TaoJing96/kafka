@@ -21,7 +21,7 @@ import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.internals.AbstractStoreBuilder;
 
-public class MockKeyValueStoreBuilder extends AbstractStoreBuilder<Integer, byte[], KeyValueStore<Object, Object>> {
+public class MockKeyValueStoreBuilder extends AbstractStoreBuilder<Integer, byte[], KeyValueStore> {
 
     private final boolean persistent;
 
@@ -32,7 +32,7 @@ public class MockKeyValueStoreBuilder extends AbstractStoreBuilder<Integer, byte
     }
 
     @Override
-    public KeyValueStore<Object, Object> build() {
+    public KeyValueStore build() {
         return new MockKeyValueStore(name, persistent);
     }
 }

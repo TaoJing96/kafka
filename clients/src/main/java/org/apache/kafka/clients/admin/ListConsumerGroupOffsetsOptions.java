@@ -23,9 +23,9 @@ import org.apache.kafka.common.annotation.InterfaceStability;
 import java.util.List;
 
 /**
- * Options for {@link Admin#listConsumerGroupOffsets(String)}.
+ * Options for {@link AdminClient#listConsumerGroupOffsets(String)}.
  * <p>
- * The API of this class is evolving, see {@link Admin} for details.
+ * The API of this class is evolving, see {@link AdminClient} for details.
  */
 @InterfaceStability.Evolving
 public class ListConsumerGroupOffsetsOptions extends AbstractOptions<ListConsumerGroupOffsetsOptions> {

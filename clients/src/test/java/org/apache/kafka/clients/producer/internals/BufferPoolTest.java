@@ -16,33 +16,28 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import org.apache.kafka.clients.producer.BufferExhaustedException;
-import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
+import org.junit.After;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
@@ -51,10 +46,10 @@ import static org.mockito.Mockito.verify;
 public class BufferPoolTest {
     private final MockTime time = new MockTime();
     private final Metrics metrics = new Metrics(time);
-    private final long maxBlockTimeMs = 10;
+    private final long maxBlockTimeMs = 2000;
     private final String metricGroup = "TestMetrics";
 
-    @AfterEach
+    @After
     public void teardown() {
         this.metrics.close();
     }
@@ -68,36 +63,36 @@ public class BufferPoolTest {
         int size = 1024;
         BufferPool pool = new BufferPool(totalMemory, size, metrics, time, metricGroup);
         ByteBuffer buffer = pool.allocate(size, maxBlockTimeMs);
-        assertEquals(size, buffer.limit(), "Buffer size should equal requested size.");
-        assertEquals(totalMemory - size, pool.unallocatedMemory(), "Unallocated memory should have shrunk");
-        assertEquals(totalMemory - size, pool.availableMemory(), "Available memory should have shrunk");
+        assertEquals("Buffer size should equal requested size.", size, buffer.limit());
+        assertEquals("Unallocated memory should have shrunk", totalMemory - size, pool.unallocatedMemory());
+        assertEquals("Available memory should have shrunk", totalMemory - size, pool.availableMemory());
         buffer.putInt(1);
         buffer.flip();
         pool.deallocate(buffer);
-        assertEquals(totalMemory, pool.availableMemory(), "All memory should be available");
-        assertEquals(totalMemory - size, pool.unallocatedMemory(), "But now some is on the free list");
+        assertEquals("All memory should be available", totalMemory, pool.availableMemory());
+        assertEquals("But now some is on the free list", totalMemory - size, pool.unallocatedMemory());
         buffer = pool.allocate(size, maxBlockTimeMs);
-        assertEquals(0, buffer.position(), "Recycled buffer should be cleared.");
-        assertEquals(buffer.capacity(), buffer.limit(), "Recycled buffer should be cleared.");
+        assertEquals("Recycled buffer should be cleared.", 0, buffer.position());
+        assertEquals("Recycled buffer should be cleared.", buffer.capacity(), buffer.limit());
         pool.deallocate(buffer);
-        assertEquals(totalMemory, pool.availableMemory(), "All memory should be available");
-        assertEquals(totalMemory - size, pool.unallocatedMemory(), "Still a single buffer on the free list");
+        assertEquals("All memory should be available", totalMemory, pool.availableMemory());
+        assertEquals("Still a single buffer on the free list", totalMemory - size, pool.unallocatedMemory());
         buffer = pool.allocate(2 * size, maxBlockTimeMs);
         pool.deallocate(buffer);
-        assertEquals(totalMemory, pool.availableMemory(), "All memory should be available");
-        assertEquals(totalMemory - size, pool.unallocatedMemory(), "Non-standard size didn't go to the free list.");
+        assertEquals("All memory should be available", totalMemory, pool.availableMemory());
+        assertEquals("Non-standard size didn't go to the free list.", totalMemory - size, pool.unallocatedMemory());
     }
 
     /**
      * Test that we cannot try to allocate more memory then we have in the whole pool
      */
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testCantAllocateMoreMemoryThanWeHave() throws Exception {
         BufferPool pool = new BufferPool(1024, 512, metrics, time, metricGroup);
         ByteBuffer buffer = pool.allocate(1024, maxBlockTimeMs);
         assertEquals(1024, buffer.limit());
         pool.deallocate(buffer);
-        assertThrows(IllegalArgumentException.class, () -> pool.allocate(1025, maxBlockTimeMs));
+        pool.allocate(1025, maxBlockTimeMs);
     }
 
     /**
@@ -109,61 +104,57 @@ public class BufferPoolTest {
         ByteBuffer buffer = pool.allocate(1024, maxBlockTimeMs);
         CountDownLatch doDealloc = asyncDeallocate(pool, buffer);
         CountDownLatch allocation = asyncAllocate(pool, 5 * 1024);
-        assertEquals(1L, allocation.getCount(), "Allocation shouldn't have happened yet, waiting on memory.");
+        assertEquals("Allocation shouldn't have happened yet, waiting on memory.", 1L, allocation.getCount());
         doDealloc.countDown(); // return the memory
-        assertTrue(allocation.await(1, TimeUnit.SECONDS), "Allocation should succeed soon after de-allocation");
+        assertTrue("Allocation should succeed soon after de-allocation", allocation.await(1, TimeUnit.SECONDS));
     }
 
     private CountDownLatch asyncDeallocate(final BufferPool pool, final ByteBuffer buffer) {
         final CountDownLatch latch = new CountDownLatch(1);
-        Thread thread = new Thread(() -> {
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        Thread thread = new Thread() {
+            public void run() {
+                try {
+                    latch.await();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                pool.deallocate(buffer);
             }
-            pool.deallocate(buffer);
-        });
+        };
         thread.start();
         return latch;
     }
 
     private void delayedDeallocate(final BufferPool pool, final ByteBuffer buffer, final long delayMs) {
-        Thread thread = new Thread(() -> {
-            Time.SYSTEM.sleep(delayMs);
-            pool.deallocate(buffer);
-        });
+        Thread thread = new Thread() {
+            public void run() {
+                Time.SYSTEM.sleep(delayMs);
+                pool.deallocate(buffer);
+            }
+        };
         thread.start();
     }
 
     private CountDownLatch asyncAllocate(final BufferPool pool, final int size) {
         final CountDownLatch completed = new CountDownLatch(1);
-        Thread thread = new Thread(() -> {
-            try {
-                pool.allocate(size, maxBlockTimeMs);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            } finally {
-                completed.countDown();
+        Thread thread = new Thread() {
+            public void run() {
+                try {
+                    pool.allocate(size, maxBlockTimeMs);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } finally {
+                    completed.countDown();
+                }
             }
-        });
+        };
         thread.start();
         return completed;
     }
 
     /**
-     * Test if BufferExhausted exception is thrown when there is not enough memory to allocate and the elapsed
-     * time is greater than the max specified block time.
-     */
-    @Test
-    public void testBufferExhaustedExceptionIsThrown() throws Exception {
-        BufferPool pool = new BufferPool(2, 1, metrics, time, metricGroup);
-        pool.allocate(1, maxBlockTimeMs);
-        assertThrows(BufferExhaustedException.class, () -> pool.allocate(2, maxBlockTimeMs));
-    }
-
-    /**
-     * Verify that a failed allocation attempt due to not enough memory finishes soon after the maxBlockTimeMs.
+     * Test if Timeout exception is thrown when there is not enough memory to allocate and the elapsed time is greater than the max specified block time.
+     * And verify that the allocation attempt finishes soon after the maxBlockTimeMs.
      */
     @Test
     public void testBlockTimeout() throws Exception {
@@ -181,14 +172,14 @@ public class BufferPoolTest {
         try {
             pool.allocate(10, maxBlockTimeMs);
             fail("The buffer allocated more memory than its maximum value 10");
-        } catch (BufferExhaustedException e) {
+        } catch (TimeoutException e) {
             // this is good
         }
         // Thread scheduling sometimes means that deallocation varies by this point
-        assertTrue(pool.availableMemory() >= 7 && pool.availableMemory() <= 10, "available memory " + pool.availableMemory());
+        assertTrue("available memory " + pool.availableMemory(), pool.availableMemory() >= 8 && pool.availableMemory() <= 10);
         long durationMs = Time.SYSTEM.milliseconds() - beginTimeMs;
-        assertTrue(durationMs >= maxBlockTimeMs, "BufferExhaustedException should not throw before maxBlockTimeMs");
-        assertTrue(durationMs < maxBlockTimeMs + 1000, "BufferExhaustedException should throw soon after maxBlockTimeMs");
+        assertTrue("TimeoutException should not throw before maxBlockTimeMs", durationMs >= maxBlockTimeMs);
+        assertTrue("TimeoutException should throw soon after maxBlockTimeMs", durationMs < maxBlockTimeMs + 1000);
     }
 
     /**
@@ -201,7 +192,7 @@ public class BufferPoolTest {
         try {
             pool.allocate(2, maxBlockTimeMs);
             fail("The buffer allocated more memory than its maximum value 2");
-        } catch (BufferExhaustedException e) {
+        } catch (TimeoutException e) {
             // this is good
         }
         assertEquals(0, pool.queued());
@@ -241,7 +232,7 @@ public class BufferPoolTest {
         // both the allocate() called by threads t1 and t2 should have been interrupted and the waiters queue should be empty
         assertEquals(pool.queued(), 0);
     }
-
+    
     @Test
     public void testCleanupMemoryAvailabilityOnMetricsException() throws Exception {
         BufferPool bufferPool = spy(new BufferPool(2, 1, new Metrics(), time, metricGroup));
@@ -276,7 +267,7 @@ public class BufferPoolTest {
             try {
                 pool.allocate(2, maxBlockTimeMs);
                 fail("The buffer allocated more memory than its maximum value 2");
-            } catch (BufferExhaustedException e) {
+            } catch (TimeoutException e) {
                 // this is good
             } catch (InterruptedException e) {
                 // this can be neglected
@@ -302,7 +293,7 @@ public class BufferPoolTest {
         for (StressTestThread thread : threads)
             thread.join();
         for (StressTestThread thread : threads)
-            assertTrue(thread.success.get(), "Thread should have completed all iterations successfully.");
+            assertTrue("Thread should have completed all iterations successfully.", thread.success.get());
         assertEquals(totalMemory, pool.availableMemory());
     }
 
@@ -366,7 +357,6 @@ public class BufferPoolTest {
             this.pool = pool;
         }
 
-        @Override
         public void run() {
             try {
                 for (int i = 0; i < iterations; i++) {
@@ -385,48 +375,6 @@ public class BufferPoolTest {
                 e.printStackTrace();
             }
         }
-    }
-
-    @Test
-    public void testCloseAllocations() throws Exception {
-        BufferPool pool = new BufferPool(10, 1, metrics, Time.SYSTEM, metricGroup);
-        ByteBuffer buffer = pool.allocate(1, maxBlockTimeMs);
-
-        // Close the buffer pool. This should prevent any further allocations.
-        pool.close();
-
-        assertThrows(KafkaException.class, () -> pool.allocate(1, maxBlockTimeMs));
-
-        // Ensure deallocation still works.
-        pool.deallocate(buffer);
-    }
-
-    @Test
-    public void testCloseNotifyWaiters() throws Exception {
-        final int numWorkers = 2;
-
-        BufferPool pool = new BufferPool(1, 1, metrics, Time.SYSTEM, metricGroup);
-        ByteBuffer buffer = pool.allocate(1, Long.MAX_VALUE);
-
-        ExecutorService executor = Executors.newFixedThreadPool(numWorkers);
-        Callable<Void> work = new Callable<Void>() {
-                public Void call() throws Exception {
-                    assertThrows(KafkaException.class, () -> pool.allocate(1, Long.MAX_VALUE));
-                    return null;
-                }
-            };
-        for (int i = 0; i < numWorkers; ++i) {
-            executor.submit(work);
-        }
-
-        TestUtils.waitForCondition(() -> pool.queued() == numWorkers, "Awaiting " + numWorkers + " workers to be blocked on allocation");
-
-        // Close the buffer pool. This should notify all waiters.
-        pool.close();
-
-        TestUtils.waitForCondition(() -> pool.queued() == 0, "Awaiting " + numWorkers + " workers to be interrupted from allocation");
-
-        pool.deallocate(buffer);
     }
 
 }

@@ -18,7 +18,8 @@ package kafka.server
 
 import java.util.concurrent.locks.ReadWriteLock
 
-import org.apache.kafka.common.metrics.{Metrics, Sensor}
+import org.apache.kafka.common.MetricName
+import org.apache.kafka.common.metrics.{MeasurableStat, MetricConfig, Metrics, Sensor}
 
 /**
   * Class which centralises the logic for creating/accessing sensors.
@@ -28,7 +29,8 @@ import org.apache.kafka.common.metrics.{Metrics, Sensor}
   */
 class SensorAccess(lock: ReadWriteLock, metrics: Metrics) {
 
-  def getOrCreate(sensorName: String, expirationTime: Long, registerMetrics: Sensor => Unit): Sensor = {
+  def getOrCreate(sensorName: String, expirationTime: Long,
+                  metricName: => MetricName, config: => Option[MetricConfig], measure: => MeasurableStat): Sensor = {
     var sensor: Sensor = null
 
     /* Acquire the read lock to fetch the sensor. It is safe to call getSensor from multiple threads.
@@ -59,8 +61,8 @@ class SensorAccess(lock: ReadWriteLock, metrics: Metrics) {
         // ensure that we initialise `ClientSensors` with non-null parameters.
         sensor = metrics.getSensor(sensorName)
         if (sensor == null) {
-          sensor = metrics.sensor(sensorName, null, expirationTime)
-          registerMetrics(sensor)
+          sensor = metrics.sensor(sensorName, config.orNull, expirationTime)
+          sensor.add(metricName, measure)
         }
       } finally {
         lock.writeLock().unlock()

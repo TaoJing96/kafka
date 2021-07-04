@@ -81,7 +81,7 @@ public final class Maybe<T> {
     @Override
     public String toString() {
         if (defined) {
-            return "DefinedMaybe{" + nullableValue + "}";
+            return "DefinedMaybe{" + String.valueOf(nullableValue) + "}";
         } else {
             return "UndefinedMaybe{}";
         }

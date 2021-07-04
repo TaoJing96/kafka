@@ -18,32 +18,26 @@ package org.apache.kafka.streams.kstream.internals.suppress;
 
 import org.apache.kafka.streams.kstream.Suppressed;
 
-import java.util.Collections;
-import java.util.Map;
 import java.util.Objects;
 
 public class EagerBufferConfigImpl extends BufferConfigInternal<Suppressed.EagerBufferConfig> implements Suppressed.EagerBufferConfig {
 
     private final long maxRecords;
     private final long maxBytes;
-    private final Map<String, String> logConfig;
 
-    public EagerBufferConfigImpl(final long maxRecords,
-                                 final long maxBytes,
-                                 final Map<String, String> logConfig) {
+    public EagerBufferConfigImpl(final long maxRecords, final long maxBytes) {
         this.maxRecords = maxRecords;
         this.maxBytes = maxBytes;
-        this.logConfig = logConfig;
     }
 
     @Override
     public Suppressed.EagerBufferConfig withMaxRecords(final long recordLimit) {
-        return new EagerBufferConfigImpl(recordLimit, maxBytes, logConfig);
+        return new EagerBufferConfigImpl(recordLimit, maxBytes);
     }
 
     @Override
     public Suppressed.EagerBufferConfig withMaxBytes(final long byteLimit) {
-        return new EagerBufferConfigImpl(maxRecords, byteLimit, logConfig);
+        return new EagerBufferConfigImpl(maxRecords, byteLimit);
     }
 
     @Override
@@ -62,26 +56,6 @@ public class EagerBufferConfigImpl extends BufferConfigInternal<Suppressed.Eager
     }
 
     @Override
-    public Suppressed.EagerBufferConfig withLoggingDisabled() {
-        return new EagerBufferConfigImpl(maxRecords, maxBytes, null);
-    }
-
-    @Override
-    public Suppressed.EagerBufferConfig withLoggingEnabled(final Map<String, String> config) {
-        return new EagerBufferConfigImpl(maxRecords, maxBytes, config);
-    }
-
-    @Override
-    public boolean isLoggingEnabled() {
-        return logConfig != null;
-    }
-
-    @Override
-    public Map<String, String> getLogConfig() {
-        return isLoggingEnabled() ? logConfig : Collections.emptyMap();
-    }
-
-    @Override
     public boolean equals(final Object o) {
         if (this == o) {
             return true;
@@ -91,20 +65,16 @@ public class EagerBufferConfigImpl extends BufferConfigInternal<Suppressed.Eager
         }
         final EagerBufferConfigImpl that = (EagerBufferConfigImpl) o;
         return maxRecords == that.maxRecords &&
-            maxBytes == that.maxBytes &&
-            Objects.equals(getLogConfig(), that.getLogConfig());
+            maxBytes == that.maxBytes;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(maxRecords, maxBytes, getLogConfig());
+        return Objects.hash(maxRecords, maxBytes);
     }
 
     @Override
     public String toString() {
-        return "EagerBufferConfigImpl{maxRecords=" + maxRecords +
-                ", maxBytes=" + maxBytes +
-                ", logConfig=" + getLogConfig() +
-                "}";
+        return "EagerBufferConfigImpl{maxRecords=" + maxRecords + ", maxBytes=" + maxBytes + '}';
     }
 }

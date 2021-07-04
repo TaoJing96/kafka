@@ -14,33 +14,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.kafka.streams.scala.kstream
 
 import org.apache.kafka.streams.kstream.internals.GroupedInternal
-import org.apache.kafka.streams.scala.serialization.Serdes
-import org.apache.kafka.streams.scala.serialization.Serdes._
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
+import org.apache.kafka.streams.scala.Serdes
+import org.apache.kafka.streams.scala.Serdes._
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{FlatSpec, Matchers}
 
-class GroupedTest {
+@RunWith(classOf[JUnitRunner])
+class GroupedTest extends FlatSpec with Matchers {
 
-  @Test
-  def testCreateGrouped(): Unit = {
+  "Create a Grouped" should "create a Grouped with Serdes" in {
     val grouped: Grouped[String, Long] = Grouped.`with`[String, Long]
 
     val internalGrouped = new GroupedInternal[String, Long](grouped)
-    assertEquals(Serdes.stringSerde.getClass, internalGrouped.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalGrouped.valueSerde.getClass)
+    internalGrouped.keySerde.getClass shouldBe Serdes.String.getClass
+    internalGrouped.valueSerde.getClass shouldBe Serdes.Long.getClass
   }
 
-  @Test
-  def testCreateGroupedWithRepartitionTopicName(): Unit = {
+  "Create a Grouped with repartition topic name" should "create a Grouped with Serdes, and repartition topic name" in {
     val repartitionTopicName = "repartition-topic"
     val grouped: Grouped[String, Long] = Grouped.`with`(repartitionTopicName)
 
     val internalGrouped = new GroupedInternal[String, Long](grouped)
-    assertEquals(Serdes.stringSerde.getClass, internalGrouped.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalGrouped.valueSerde.getClass)
-    assertEquals(repartitionTopicName, internalGrouped.name())
+    internalGrouped.keySerde.getClass shouldBe Serdes.String.getClass
+    internalGrouped.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalGrouped.name() shouldBe repartitionTopicName
   }
+
 }

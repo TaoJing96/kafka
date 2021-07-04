@@ -19,7 +19,6 @@ package org.apache.kafka.streams.tests;
 
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
-import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KafkaStreams.State;
@@ -111,12 +110,14 @@ public class StreamsNamedRepartitionTest {
 
         streams.start();
 
-        Exit.addShutdownHook("streams-shutdown-hook", () -> {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("closing Kafka Streams instance");
             System.out.flush();
             streams.close(Duration.ofMillis(5000));
             System.out.println("NAMED_REPARTITION_TEST Streams Stopped");
             System.out.flush();
-        });
+        }));
+
     }
+
 }

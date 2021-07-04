@@ -25,24 +25,22 @@ import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.slf4j.Logger;
 
-import java.util.Optional;
-
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG;
 
 class RecordDeserializer {
-    private final Logger log;
-    private final SourceNode<?, ?> sourceNode;
-    private final Sensor droppedRecordsSensor;
+    private final SourceNode sourceNode;
     private final DeserializationExceptionHandler deserializationExceptionHandler;
+    private final Logger log;
+    private final Sensor skippedRecordSensor;
 
-    RecordDeserializer(final SourceNode<?, ?> sourceNode,
+    RecordDeserializer(final SourceNode sourceNode,
                        final DeserializationExceptionHandler deserializationExceptionHandler,
                        final LogContext logContext,
-                       final Sensor droppedRecordsSensor) {
+                       final Sensor skippedRecordsSensor) {
         this.sourceNode = sourceNode;
         this.deserializationExceptionHandler = deserializationExceptionHandler;
         this.log = logContext.logger(RecordDeserializer.class);
-        this.droppedRecordsSensor = droppedRecordsSensor;
+        this.skippedRecordSensor = skippedRecordsSensor;
     }
 
     /**
@@ -50,6 +48,7 @@ class RecordDeserializer {
      *                          {@link DeserializationExceptionHandler.DeserializationHandlerResponse#FAIL FAIL}
      *                          or throws an exception itself
      */
+    @SuppressWarnings("deprecation")
     ConsumerRecord<Object, Object> deserialize(final ProcessorContext processorContext,
                                                final ConsumerRecord<byte[], byte[]> rawRecord) {
 
@@ -60,13 +59,11 @@ class RecordDeserializer {
                 rawRecord.offset(),
                 rawRecord.timestamp(),
                 TimestampType.CREATE_TIME,
+                rawRecord.checksum(),
                 rawRecord.serializedKeySize(),
                 rawRecord.serializedValueSize(),
                 sourceNode.deserializeKey(rawRecord.topic(), rawRecord.headers(), rawRecord.key()),
-                sourceNode.deserializeValue(rawRecord.topic(), rawRecord.headers(), rawRecord.value()),
-                rawRecord.headers(),
-                Optional.empty()
-            );
+                sourceNode.deserializeValue(rawRecord.topic(), rawRecord.headers(), rawRecord.value()), rawRecord.headers());
         } catch (final Exception deserializationException) {
             final DeserializationExceptionHandler.DeserializationHandlerResponse response;
             try {
@@ -93,13 +90,13 @@ class RecordDeserializer {
                     rawRecord.offset(),
                     deserializationException
                 );
-                droppedRecordsSensor.record();
+                skippedRecordSensor.record();
                 return null;
             }
         }
     }
 
-    SourceNode<?, ?> sourceNode() {
+    SourceNode sourceNode() {
         return sourceNode;
     }
 }

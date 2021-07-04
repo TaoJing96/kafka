@@ -19,18 +19,18 @@ package kafka.log
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
-import java.nio.file.{Files, NoSuchFileException, StandardOpenOption}
-import java.util.concurrent.ConcurrentSkipListMap
+import java.nio.file.{Files, StandardOpenOption}
+
 import kafka.log.Log.offsetFromFile
 import kafka.server.LogOffsetMetadata
-import kafka.utils.{CoreUtils, Logging, nonthreadsafe, threadsafe}
+import kafka.utils.{Logging, nonthreadsafe, threadsafe}
 import org.apache.kafka.common.{KafkaException, TopicPartition}
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.protocol.types._
 import org.apache.kafka.common.record.{ControlRecordType, DefaultRecordBatch, EndTransactionMarker, RecordBatch}
-import org.apache.kafka.common.utils.{ByteUtils, Crc32C, Time, Utils}
+import org.apache.kafka.common.utils.{ByteUtils, Crc32C}
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 import scala.collection.{immutable, mutable}
 
@@ -43,11 +43,7 @@ class CorruptSnapshotException(msg: String) extends KafkaException(msg)
 case class LastRecord(lastDataOffset: Option[Long], producerEpoch: Short)
 
 
-private[log] case class TxnMetadata(
-  producerId: Long,
-  firstOffset: LogOffsetMetadata,
-  var lastOffset: Option[Long] = None
-) {
+private[log] case class TxnMetadata(producerId: Long, var firstOffset: LogOffsetMetadata, var lastOffset: Option[Long] = None) {
   def this(producerId: Long, firstOffset: Long) = this(producerId, LogOffsetMetadata(firstOffset))
 
   override def toString: String = {
@@ -136,6 +132,8 @@ private[log] class ProducerStateEntry(val producerId: Long,
     this.lastTimestamp = nextEntry.lastTimestamp
   }
 
+  def removeBatchesOlderThan(offset: Long): Unit = batchMetadata.dropWhile(_.lastOffset < offset)
+
   def findDuplicateBatch(batch: RecordBatch): Option[BatchMetadata] = {
     if (batch.producerEpoch != producerEpoch)
        None
@@ -175,7 +173,7 @@ private[log] class ProducerStateEntry(val producerId: Long,
  *                      in the current entry so that the space overhead is constant.
  * @param origin Indicates the origin of the append which implies the extent of validation. For example, offset
  *               commits, which originate from the group coordinator, do not have sequence numbers and therefore
- *               only producer epoch validation is done. Appends which come through replication are not validated
+ *               only producer epoch validation is done. Appends which come through replciation are not validated
  *               (we assume the validation has already been done) and appends from clients require full validation.
  */
 private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
@@ -200,16 +198,13 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
 
   private def checkProducerEpoch(producerEpoch: Short, offset: Long): Unit = {
     if (producerEpoch < updatedEntry.producerEpoch) {
-      val message = s"Epoch of producer $producerId at offset $offset in $topicPartition is $producerEpoch, " +
-        s"which is smaller than the last seen epoch ${updatedEntry.producerEpoch}"
+      val message = s"Producer's epoch at offset $offset in $topicPartition is $producerEpoch, which is " +
+        s"smaller than the last seen epoch ${updatedEntry.producerEpoch}"
 
       if (origin == AppendOrigin.Replication) {
         warn(message)
       } else {
-        // Starting from 2.7, we replaced ProducerFenced error with InvalidProducerEpoch in the
-        // producer send response callback to differentiate from the former fatal exception,
-        // letting client abort the ongoing transaction and retry.
-        throw new InvalidProducerEpochException(message)
+        throw new ProducerFencedException(message)
       }
     }
   }
@@ -218,9 +213,12 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
     if (producerEpoch != updatedEntry.producerEpoch) {
       if (appendFirstSeq != 0) {
         if (updatedEntry.producerEpoch != RecordBatch.NO_PRODUCER_EPOCH) {
-          throw new OutOfOrderSequenceException(s"Invalid sequence number for new epoch of producer $producerId " +
-            s"at offset $offset in partition $topicPartition: $producerEpoch (request epoch), $appendFirstSeq (seq. number), " +
-            s"${updatedEntry.producerEpoch} (current producer epoch)")
+          throw new OutOfOrderSequenceException(s"Invalid sequence number for new epoch at offset $offset in " +
+            s"partition $topicPartition: $producerEpoch (request epoch), $appendFirstSeq (seq. number)")
+        } else {
+          throw new UnknownProducerIdException(s"Found no record of producerId=$producerId on the broker at offset $offset" +
+            s"in partition $topicPartition. It is possible that the last message with the producerId=$producerId has " +
+            "been removed due to hitting the retention limit.")
         }
       }
     } else {
@@ -231,10 +229,17 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
       else
         RecordBatch.NO_SEQUENCE
 
-      // If there is no current producer epoch (possibly because all producer records have been deleted due to
-      // retention or the DeleteRecords API) accept writes with any sequence number
-      if (!(currentEntry.producerEpoch == RecordBatch.NO_PRODUCER_EPOCH || inSequence(currentLastSeq, appendFirstSeq))) {
-        throw new OutOfOrderSequenceException(s"Out of order sequence number for producer $producerId at " +
+      if (currentLastSeq == RecordBatch.NO_SEQUENCE && appendFirstSeq != 0) {
+        // We have a matching epoch, but we do not know the next sequence number. This case can happen if
+        // only a transaction marker is left in the log for this producer. We treat this as an unknown
+        // producer id error, so that the producer can check the log start offset for truncation and reset
+        // the sequence number. Note that this check follows the fencing check, so the marker still fences
+        // old producers even if it cannot determine our next expected sequence number.
+        throw new UnknownProducerIdException(s"Local producer state matches expected epoch $producerEpoch " +
+          s"for producerId=$producerId at offset $offset in partition $topicPartition, but the next expected " +
+          "sequence number is not known.")
+      } else if (!inSequence(currentLastSeq, appendFirstSeq)) {
+        throw new OutOfOrderSequenceException(s"Out of order sequence number for producerId $producerId at " +
           s"offset $offset in partition $topicPartition: $appendFirstSeq (incoming seq. number), " +
           s"$currentLastSeq (current end sequence number)")
       }
@@ -251,7 +256,8 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
       if (recordIterator.hasNext) {
         val record = recordIterator.next()
         val endTxnMarker = EndTransactionMarker.deserialize(record)
-        appendEndTxnMarker(endTxnMarker, batch.producerEpoch, batch.baseOffset, record.timestamp)
+        val completedTxn = appendEndTxnMarker(endTxnMarker, batch.producerEpoch, batch.baseOffset, record.timestamp)
+        Some(completedTxn)
       } else {
         // An empty control batch means the entire transaction has been cleaned from the log, so no need to append
         None
@@ -279,7 +285,7 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
       case Some(_) if !isTransactional =>
         // Received a non-transactional message while a transaction is active
         throw new InvalidTxnStateException(s"Expected transactional write from producer $producerId at " +
-          s"offset $firstOffsetMetadata in partition $topicPartition")
+          s"offset $firstOffset in partition $topicPartition")
 
       case None if isTransactional =>
         // Began a new transaction
@@ -304,20 +310,18 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
     }
   }
 
-  def appendEndTxnMarker(
-    endTxnMarker: EndTransactionMarker,
-    producerEpoch: Short,
-    offset: Long,
-    timestamp: Long
-  ): Option[CompletedTxn] = {
+  def appendEndTxnMarker(endTxnMarker: EndTransactionMarker,
+                         producerEpoch: Short,
+                         offset: Long,
+                         timestamp: Long): CompletedTxn = {
     checkProducerEpoch(producerEpoch, offset)
     checkCoordinatorEpoch(endTxnMarker, offset)
 
-    // Only emit the `CompletedTxn` for non-empty transactions. A transaction marker
-    // without any associated data will not have any impact on the last stable offset
-    // and would not need to be reflected in the transaction index.
-    val completedTxn = updatedEntry.currentTxnFirstOffset.map { firstOffset =>
-      CompletedTxn(producerId, firstOffset, offset, endTxnMarker.controlType == ControlRecordType.ABORT)
+    val firstOffset = updatedEntry.currentTxnFirstOffset match {
+      case Some(txnFirstOffset) => txnFirstOffset
+      case None =>
+        transactions += new TxnMetadata(producerId, offset)
+        offset
     }
 
     updatedEntry.maybeUpdateProducerEpoch(producerEpoch)
@@ -325,12 +329,24 @@ private[log] class ProducerAppendInfo(val topicPartition: TopicPartition,
     updatedEntry.coordinatorEpoch = endTxnMarker.coordinatorEpoch
     updatedEntry.lastTimestamp = timestamp
 
-    completedTxn
+    CompletedTxn(producerId, firstOffset, offset, endTxnMarker.controlType == ControlRecordType.ABORT)
   }
 
   def toEntry: ProducerStateEntry = updatedEntry
 
   def startedTransactions: List[TxnMetadata] = transactions.toList
+
+  def maybeCacheTxnFirstOffsetMetadata(logOffsetMetadata: LogOffsetMetadata): Unit = {
+    // we will cache the log offset metadata if it corresponds to the starting offset of
+    // the last transaction that was started. This is optimized for leader appends where it
+    // is only possible to have one transaction started for each log append, and the log
+    // offset metadata will always match in that case since no data from other producers
+    // is mixed into the append
+    transactions.headOption.foreach { txn =>
+      if (txn.firstOffset.messageOffset == logOffsetMetadata.messageOffset)
+        txn.firstOffset = logOffsetMetadata
+    }
+  }
 
   override def toString: String = {
     "ProducerAppendInfo(" +
@@ -416,7 +432,7 @@ object ProducerStateManager {
     }
   }
 
-  private def writeSnapshot(file: File, entries: mutable.Map[Long, ProducerStateEntry]): Unit = {
+  private def writeSnapshot(file: File, entries: mutable.Map[Long, ProducerStateEntry]) {
     val struct = new Struct(PidSnapshotMapSchema)
     struct.set(VersionField, ProducerSnapshotVersion)
     struct.set(CrcField, 0L) // we'll fill this after writing the entries
@@ -444,24 +460,30 @@ object ProducerStateManager {
     ByteUtils.writeUnsignedInt(buffer, CrcOffset, crc)
 
     val fileChannel = FileChannel.open(file.toPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
-    try {
-      fileChannel.write(buffer)
-      fileChannel.force(true)
-    } finally {
-      fileChannel.close()
-    }
+    try fileChannel.write(buffer)
+    finally fileChannel.close()
   }
 
   private def isSnapshotFile(file: File): Boolean = file.getName.endsWith(Log.ProducerSnapshotFileSuffix)
 
   // visible for testing
-  private[log] def listSnapshotFiles(dir: File): Seq[SnapshotFile] = {
+  private[log] def listSnapshotFiles(dir: File): Seq[File] = {
     if (dir.exists && dir.isDirectory) {
       Option(dir.listFiles).map { files =>
-        files.filter(f => f.isFile && isSnapshotFile(f)).map(SnapshotFile(_)).toSeq
+        files.filter(f => f.isFile && isSnapshotFile(f)).toSeq
       }.getOrElse(Seq.empty)
     } else Seq.empty
   }
+
+  // visible for testing
+  private[log] def deleteSnapshotsBefore(dir: File, offset: Long): Unit = deleteSnapshotFiles(dir, _ < offset)
+
+  private def deleteSnapshotFiles(dir: File, predicate: Long => Boolean = _ => true) {
+    listSnapshotFiles(dir).filter(file => predicate(offsetFromFile(file))).foreach { file =>
+      Files.deleteIfExists(file.toPath)
+    }
+  }
+
 }
 
 /**
@@ -482,17 +504,12 @@ object ProducerStateManager {
  */
 @nonthreadsafe
 class ProducerStateManager(val topicPartition: TopicPartition,
-                           @volatile var _logDir: File,
-                           val maxProducerIdExpirationMs: Int = 60 * 60 * 1000,
-                           val time: Time = Time.SYSTEM) extends Logging {
+                           @volatile var logDir: File,
+                           val maxProducerIdExpirationMs: Int = 60 * 60 * 1000) extends Logging {
   import ProducerStateManager._
   import java.util
 
   this.logIdent = s"[ProducerStateManager partition=$topicPartition] "
-
-  private var snapshots: ConcurrentSkipListMap[java.lang.Long, SnapshotFile] = locally {
-    loadSnapshots()
-  }
 
   private val producers = mutable.Map.empty[Long, ProducerStateEntry]
   private var lastMapOffset = 0L
@@ -503,59 +520,6 @@ class ProducerStateManager(val topicPartition: TopicPartition,
 
   // completed transactions whose markers are at offsets above the high watermark
   private val unreplicatedTxns = new util.TreeMap[Long, TxnMetadata]
-
-  /**
-   * Load producer state snapshots by scanning the _logDir.
-   */
-  private def loadSnapshots(): ConcurrentSkipListMap[java.lang.Long, SnapshotFile] = {
-    val tm = new ConcurrentSkipListMap[java.lang.Long, SnapshotFile]()
-    for (f <- listSnapshotFiles(_logDir)) {
-      tm.put(f.offset, f)
-    }
-    tm
-  }
-
-  /**
-   * Scans the log directory, gathering all producer state snapshot files. Snapshot files which do not have an offset
-   * corresponding to one of the provided offsets in segmentBaseOffsets will be removed, except in the case that there
-   * is a snapshot file at a higher offset than any offset in segmentBaseOffsets.
-   *
-   * The goal here is to remove any snapshot files which do not have an associated segment file, but not to remove the
-   * largest stray snapshot file which was emitted during clean shutdown.
-   */
-  private[log] def removeStraySnapshots(segmentBaseOffsets: Seq[Long]): Unit = {
-    val maxSegmentBaseOffset = if (segmentBaseOffsets.isEmpty) None else Some(segmentBaseOffsets.max)
-    val baseOffsets = segmentBaseOffsets.toSet
-    var latestStraySnapshot: Option[SnapshotFile] = None
-
-    val ss = loadSnapshots()
-    for (snapshot <- ss.values().asScala) {
-      val key = snapshot.offset
-      latestStraySnapshot match {
-        case Some(prev) =>
-          if (!baseOffsets.contains(key)) {
-            // this snapshot is now the largest stray snapshot.
-            prev.deleteIfExists()
-            ss.remove(prev.offset)
-            latestStraySnapshot = Some(snapshot)
-          }
-        case None =>
-          if (!baseOffsets.contains(key)) {
-            latestStraySnapshot = Some(snapshot)
-          }
-      }
-    }
-
-    // Check to see if the latestStraySnapshot is larger than the largest segment base offset, if it is not,
-    // delete the largestStraySnapshot.
-    for (strayOffset <- latestStraySnapshot.map(_.offset); maxOffset <- maxSegmentBaseOffset) {
-      if (strayOffset < maxOffset) {
-        Option(ss.remove(strayOffset)).foreach(_.deleteIfExists())
-      }
-    }
-
-    this.snapshots = ss
-  }
 
   /**
    * An unstable offset is one which is either undecided (i.e. its ultimate outcome is not yet known),
@@ -585,15 +549,14 @@ class ProducerStateManager(val topicPartition: TopicPartition,
 
   /**
    * The first undecided offset is the earliest transactional message which has not yet been committed
-   * or aborted. Unlike [[firstUnstableOffset]], this does not reflect the state of replication (i.e.
-   * whether a completed transaction marker is beyond the high watermark).
+   * or aborted.
    */
-  private[log] def firstUndecidedOffset: Option[Long] = Option(ongoingTxns.firstEntry).map(_.getValue.firstOffset.messageOffset)
+  def firstUndecidedOffset: Option[Long] = Option(ongoingTxns.firstEntry).map(_.getValue.firstOffset.messageOffset)
 
   /**
    * Returns the last offset of this map
    */
-  def mapEndOffset: Long = lastMapOffset
+  def mapEndOffset = lastMapOffset
 
   /**
    * Get a copy of the active producers
@@ -602,21 +565,23 @@ class ProducerStateManager(val topicPartition: TopicPartition,
 
   def isEmpty: Boolean = producers.isEmpty && unreplicatedTxns.isEmpty
 
-  private def loadFromSnapshot(logStartOffset: Long, currentTime: Long): Unit = {
+  private def loadFromSnapshot(logStartOffset: Long, currentTime: Long) {
     while (true) {
       latestSnapshotFile match {
-        case Some(snapshot) =>
+        case Some(file) =>
           try {
-            info(s"Loading producer state from snapshot file '$snapshot'")
-            val loadedProducers = readSnapshot(snapshot.file).filter { producerEntry => !isProducerExpired(currentTime, producerEntry) }
+            info(s"Loading producer state from snapshot file '$file'")
+            val loadedProducers = readSnapshot(file).filter { producerEntry =>
+              isProducerRetained(producerEntry, logStartOffset) && !isProducerExpired(currentTime, producerEntry)
+            }
             loadedProducers.foreach(loadProducerEntry)
-            lastSnapOffset = snapshot.offset
+            lastSnapOffset = offsetFromFile(file)
             lastMapOffset = lastSnapOffset
             return
           } catch {
             case e: CorruptSnapshotException =>
-              warn(s"Failed to load producer snapshot from '${snapshot.file}': ${e.getMessage}")
-              removeAndDeleteSnapshot(snapshot.offset)
+              warn(s"Failed to load producer snapshot from '$file': ${e.getMessage}")
+              Files.deleteIfExists(file.toPath)
           }
         case None =>
           lastSnapOffset = logStartOffset
@@ -641,25 +606,22 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   /**
    * Expire any producer ids which have been idle longer than the configured maximum expiration timeout.
    */
-  def removeExpiredProducers(currentTimeMs: Long): Unit = {
-    producers --= producers.filter { case (_, lastEntry) => isProducerExpired(currentTimeMs, lastEntry) }.keySet
+  def removeExpiredProducers(currentTimeMs: Long) {
+    producers.retain { case (_, lastEntry) =>
+      !isProducerExpired(currentTimeMs, lastEntry)
+    }
   }
 
   /**
    * Truncate the producer id mapping to the given offset range and reload the entries from the most recent
-   * snapshot in range (if there is one). We delete snapshot files prior to the logStartOffset but do not remove
-   * producer state from the map. This means that in-memory and on-disk state can diverge, and in the case of
-   * broker failover or unclean shutdown, any in-memory state not persisted in the snapshots will be lost, which
-   * would lead to UNKNOWN_PRODUCER_ID errors. Note that the log end offset is assumed to be less than or equal
-   * to the high watermark.
+   * snapshot in range (if there is one). Note that the log end offset is assumed to be less than
+   * or equal to the high watermark.
    */
   def truncateAndReload(logStartOffset: Long, logEndOffset: Long, currentTimeMs: Long): Unit = {
     // remove all out of range snapshots
-    snapshots.values().asScala.foreach { snapshot =>
-      if (snapshot.offset > logEndOffset || snapshot.offset <= logStartOffset) {
-        removeAndDeleteSnapshot(snapshot.offset)
-      }
-    }
+    deleteSnapshotFiles(logDir, { snapOffset =>
+      snapOffset > logEndOffset || snapOffset <= logStartOffset
+    })
 
     if (logEndOffset != mapEndOffset) {
       producers.clear()
@@ -670,7 +632,7 @@ class ProducerStateManager(val topicPartition: TopicPartition,
       unreplicatedTxns.clear()
       loadFromSnapshot(logStartOffset, currentTimeMs)
     } else {
-      onLogStartOffsetIncremented(logStartOffset)
+      truncateHead(logStartOffset)
     }
   }
 
@@ -717,12 +679,9 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   def takeSnapshot(): Unit = {
     // If not a new offset, then it is not worth taking another snapshot
     if (lastMapOffset > lastSnapOffset) {
-      val snapshotFile = SnapshotFile(Log.producerSnapshotFile(_logDir, lastMapOffset))
-      val start = time.hiResClockMs()
-      writeSnapshot(snapshotFile.file, producers)
-      info(s"Wrote producer snapshot at offset $lastMapOffset with ${producers.size} producer ids in ${time.hiResClockMs() - start} ms.")
-
-      snapshots.put(snapshotFile.offset, snapshotFile)
+      val snapshotFile = Log.producerSnapshotFile(logDir, lastMapOffset)
+      info(s"Writing producer snapshot at offset $lastMapOffset")
+      writeSnapshot(snapshotFile, producers)
 
       // Update the last snap offset according to the serialized map
       lastSnapOffset = lastMapOffset
@@ -730,41 +689,53 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   }
 
   /**
-   * Update the parentDir for this ProducerStateManager and all of the snapshot files which it manages.
-   */
-  def updateParentDir(parentDir: File): Unit = {
-    _logDir = parentDir
-    snapshots.forEach((_, s) => s.updateParentDir(parentDir))
-  }
-
-  /**
    * Get the last offset (exclusive) of the latest snapshot file.
    */
-  def latestSnapshotOffset: Option[Long] = latestSnapshotFile.map(_.offset)
+  def latestSnapshotOffset: Option[Long] = latestSnapshotFile.map(file => offsetFromFile(file))
 
   /**
    * Get the last offset (exclusive) of the oldest snapshot file.
    */
-  def oldestSnapshotOffset: Option[Long] = oldestSnapshotFile.map(_.offset)
+  def oldestSnapshotOffset: Option[Long] = oldestSnapshotFile.map(file => offsetFromFile(file))
 
-  /**
-   * Visible for testing
-   */
-  private[log] def snapshotFileForOffset(offset: Long): Option[SnapshotFile] = {
-    Option(snapshots.get(offset))
+  private def isProducerRetained(producerStateEntry: ProducerStateEntry, logStartOffset: Long): Boolean = {
+    producerStateEntry.removeBatchesOlderThan(logStartOffset)
+    producerStateEntry.lastDataOffset >= logStartOffset
   }
 
   /**
-   * Remove any unreplicated transactions lower than the provided logStartOffset and bring the lastMapOffset forward
-   * if necessary.
+   * When we remove the head of the log due to retention, we need to clean up the id map. This method takes
+   * the new start offset and removes all producerIds which have a smaller last written offset. Additionally,
+   * we remove snapshots older than the new log start offset.
+   *
+   * Note that snapshots from offsets greater than the log start offset may have producers included which
+   * should no longer be retained: these producers will be removed if and when we need to load state from
+   * the snapshot.
    */
-  def onLogStartOffsetIncremented(logStartOffset: Long): Unit = {
+  def truncateHead(logStartOffset: Long) {
+    val evictedProducerEntries = producers.filter { case (_, producerState) =>
+      !isProducerRetained(producerState, logStartOffset)
+    }
+    val evictedProducerIds = evictedProducerEntries.keySet
+
+    producers --= evictedProducerIds
+    removeEvictedOngoingTransactions(evictedProducerIds)
     removeUnreplicatedTransactions(logStartOffset)
 
     if (lastMapOffset < logStartOffset)
       lastMapOffset = logStartOffset
 
+    deleteSnapshotsBefore(logStartOffset)
     lastSnapOffset = latestSnapshotOffset.getOrElse(logStartOffset)
+  }
+
+  private def removeEvictedOngoingTransactions(expiredProducerIds: collection.Set[Long]): Unit = {
+    val iterator = ongoingTxns.entrySet.iterator
+    while (iterator.hasNext) {
+      val txnEntry = iterator.next()
+      if (expiredProducerIds.contains(txnEntry.getValue.producerId))
+        iterator.remove()
+    }
   }
 
   private def removeUnreplicatedTransactions(offset: Long): Unit = {
@@ -780,15 +751,13 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   /**
    * Truncate the producer id mapping and remove all snapshots. This resets the state of the mapping.
    */
-  def truncateFullyAndStartAt(offset: Long): Unit = {
+  def truncate() {
     producers.clear()
     ongoingTxns.clear()
     unreplicatedTxns.clear()
-    snapshots.values().asScala.foreach { snapshot =>
-      removeAndDeleteSnapshot(snapshot.offset)
-    }
+    deleteSnapshotFiles(logDir)
     lastSnapOffset = 0L
-    lastMapOffset = offset
+    lastMapOffset = 0L
   }
 
   /**
@@ -816,92 +785,24 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   }
 
   @threadsafe
-  def deleteSnapshotsBefore(offset: Long): Unit = {
-    snapshots.subMap(0, offset).values().asScala.foreach { snapshot =>
-      removeAndDeleteSnapshot(snapshot.offset)
-    }
+  def deleteSnapshotsBefore(offset: Long): Unit = ProducerStateManager.deleteSnapshotsBefore(logDir, offset)
+
+  private def oldestSnapshotFile: Option[File] = {
+    val files = listSnapshotFiles
+    if (files.nonEmpty)
+      Some(files.minBy(offsetFromFile))
+    else
+      None
   }
 
-  private def oldestSnapshotFile: Option[SnapshotFile] = {
-    Option(snapshots.firstEntry()).map(_.getValue)
+  private def latestSnapshotFile: Option[File] = {
+    val files = listSnapshotFiles
+    if (files.nonEmpty)
+      Some(files.maxBy(offsetFromFile))
+    else
+      None
   }
 
-  private def latestSnapshotFile: Option[SnapshotFile] = {
-    Option(snapshots.lastEntry()).map(_.getValue)
-  }
+  private def listSnapshotFiles: Seq[File] = ProducerStateManager.listSnapshotFiles(logDir)
 
-  /**
-   * Removes the producer state snapshot file metadata corresponding to the provided offset if it exists from this
-   * ProducerStateManager, and deletes the backing snapshot file.
-   */
-  private def removeAndDeleteSnapshot(snapshotOffset: Long): Unit = {
-    Option(snapshots.remove(snapshotOffset)).foreach(_.deleteIfExists())
-  }
-
-  /**
-   * Removes the producer state snapshot file metadata corresponding to the provided offset if it exists from this
-   * ProducerStateManager, and renames the backing snapshot file to have the Log.DeletionSuffix.
-   *
-   * Note: This method is safe to use with async deletes. If a race occurs and the snapshot file
-   *       is deleted without this ProducerStateManager instance knowing, the resulting exception on
-   *       SnapshotFile rename will be ignored and None will be returned.
-   */
-  private[log] def removeAndMarkSnapshotForDeletion(snapshotOffset: Long): Option[SnapshotFile] = {
-    Option(snapshots.remove(snapshotOffset)).flatMap { snapshot => {
-      // If the file cannot be renamed, it likely means that the file was deleted already.
-      // This can happen due to the way we construct an intermediate producer state manager
-      // during log recovery, and use it to issue deletions prior to creating the "real"
-      // producer state manager.
-      //
-      // In any case, removeAndMarkSnapshotForDeletion is intended to be used for snapshot file
-      // deletion, so ignoring the exception here just means that the intended operation was
-      // already completed.
-      try {
-        snapshot.renameTo(Log.DeletedFileSuffix)
-        Some(snapshot)
-      } catch {
-        case _: NoSuchFileException =>
-          info(s"Failed to rename producer state snapshot ${snapshot.file.getAbsoluteFile} with deletion suffix because it was already deleted")
-          None
-      }
-    }
-    }
-  }
-}
-
-case class SnapshotFile private[log] (@volatile private var _file: File,
-                                      offset: Long) extends Logging {
-  def deleteIfExists(): Boolean = {
-    val deleted = Files.deleteIfExists(file.toPath)
-    if (deleted) {
-      info(s"Deleted producer state snapshot ${file.getAbsolutePath}")
-    } else {
-      info(s"Failed to delete producer state snapshot ${file.getAbsolutePath} because it does not exist.")
-    }
-    deleted
-  }
-
-  def updateParentDir(parentDir: File): Unit = {
-    _file = new File(parentDir, _file.getName)
-  }
-
-  def file: File = {
-    _file
-  }
-
-  def renameTo(newSuffix: String): Unit = {
-    val renamed = new File(CoreUtils.replaceSuffix(_file.getPath, "", newSuffix))
-    try {
-      Utils.atomicMoveWithFallback(_file.toPath, renamed.toPath)
-    } finally {
-      _file = renamed
-    }
-  }
-}
-
-object SnapshotFile {
-  def apply(file: File): SnapshotFile = {
-    val offset = offsetFromFile(file)
-    SnapshotFile(file, offset)
-  }
 }

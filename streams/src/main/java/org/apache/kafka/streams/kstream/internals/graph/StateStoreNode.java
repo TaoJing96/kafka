@@ -14,26 +14,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.kafka.streams.kstream.internals.graph;
 
-import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.state.StoreBuilder;
 
-import java.util.Properties;
+public class StateStoreNode extends StreamsGraphNode {
 
-public class StateStoreNode<S extends StateStore> extends GraphNode {
+    protected final StoreBuilder storeBuilder;
 
-    protected final StoreBuilder<S> storeBuilder;
-
-    public StateStoreNode(final StoreBuilder<S> storeBuilder) {
+    public StateStoreNode(final StoreBuilder storeBuilder) {
         super(storeBuilder.name());
 
         this.storeBuilder = storeBuilder;
     }
 
     @Override
-    public void writeToTopology(final InternalTopologyBuilder topologyBuilder, final Properties props) {
+    public void writeToTopology(final InternalTopologyBuilder topologyBuilder) {
 
         topologyBuilder.addStateStore(storeBuilder);
     }

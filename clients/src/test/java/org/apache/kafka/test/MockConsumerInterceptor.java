@@ -26,14 +26,12 @@ import org.apache.kafka.common.ClusterResourceListener;
 import org.apache.kafka.common.ClusterResource;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -58,6 +56,7 @@ public class MockConsumerInterceptor implements ClusterResourceListener, Consume
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public ConsumerRecords<String, String> onConsume(ConsumerRecords<String, String> records) {
 
         // This will ensure that we get the cluster metadata when onConsume is called for the first time
@@ -70,14 +69,13 @@ public class MockConsumerInterceptor implements ClusterResourceListener, Consume
             for (ConsumerRecord<String, String> record: records.records(tp)) {
                 lst.add(new ConsumerRecord<>(record.topic(), record.partition(), record.offset(),
                                              record.timestamp(), record.timestampType(),
-                                             record.serializedKeySize(),
+                                             record.checksum(), record.serializedKeySize(),
                                              record.serializedValueSize(),
-                                             record.key(), record.value().toUpperCase(Locale.ROOT),
-                                             new RecordHeaders(), Optional.empty()));
+                                             record.key(), record.value().toUpperCase(Locale.ROOT)));
             }
             recordMap.put(tp, lst);
         }
-        return new ConsumerRecords<>(recordMap);
+        return new ConsumerRecords<String, String>(recordMap);
     }
 
     @Override

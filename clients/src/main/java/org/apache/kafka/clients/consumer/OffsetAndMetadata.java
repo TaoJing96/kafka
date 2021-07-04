@@ -94,9 +94,7 @@ public class OffsetAndMetadata implements Serializable {
      * @return the leader epoch or empty if not known
      */
     public Optional<Integer> leaderEpoch() {
-        if (leaderEpoch == null || leaderEpoch < 0)
-            return Optional.empty();
-        return Optional.of(leaderEpoch);
+        return Optional.ofNullable(leaderEpoch);
     }
 
     @Override

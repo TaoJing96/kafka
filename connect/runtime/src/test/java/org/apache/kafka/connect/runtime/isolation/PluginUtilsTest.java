@@ -168,7 +168,6 @@ public class PluginUtilsTest {
             "org.apache.kafka.connect.storage.StringConverterConfig",
             //"org.apache.kafka.connect.transforms.", isolated by default
             "org.apache.kafka.connect.transforms.Transformation",
-            "org.apache.kafka.connect.transforms.predicates.Predicate",
             "org.apache.kafka.connect.util.",
             "org.apache.kafka.connect.util.ConnectorUtils"
         );
@@ -282,11 +281,7 @@ public class PluginUtilsTest {
             "org.apache.kafka.connect.transforms.TimestampRouter",
             "org.apache.kafka.connect.transforms.TimestampRouter$Key",
             "org.apache.kafka.connect.transforms.TimestampRouter$Value",
-            "org.apache.kafka.connect.transforms.ValueToKey",
-            "org.apache.kafka.connect.transforms.predicates.",
-            "org.apache.kafka.connect.transforms.predicates.HasHeaderKey",
-            "org.apache.kafka.connect.transforms.predicates.RecordIsTombstone",
-            "org.apache.kafka.connect.transforms.predicates.TopicNameMatches"
+            "org.apache.kafka.connect.transforms.ValueToKey"
         );
         for (String clazz : transformsClasses) {
             assertTrue(
@@ -345,16 +340,6 @@ public class PluginUtilsTest {
                 PluginUtils.shouldLoadInIsolation(clazz)
             );
         }
-    }
-
-    @Test
-    public void testMirrorClasses() {
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.mirror.MirrorSourceTask")
-        );
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.mirror.MirrorSourceConnector")
-        );
     }
 
     @Test

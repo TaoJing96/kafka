@@ -16,61 +16,71 @@
  */
 package org.apache.kafka.log4jappender;
 
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 import org.apache.log4j.helpers.LogLog;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.easymock.EasyMock;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class KafkaLog4jAppenderTest {
 
     private Logger logger = Logger.getLogger(KafkaLog4jAppenderTest.class);
 
-    @BeforeEach
+    @Before
     public void setup() {
         LogLog.setInternalDebugging(true);
     }
 
     @Test
     public void testKafkaLog4jConfigs() {
-        Properties hostMissingProps = new Properties();
-        hostMissingProps.put("log4j.rootLogger", "INFO");
-        hostMissingProps.put("log4j.appender.KAFKA", "org.apache.kafka.log4jappender.KafkaLog4jAppender");
-        hostMissingProps.put("log4j.appender.KAFKA.layout", "org.apache.log4j.PatternLayout");
-        hostMissingProps.put("log4j.appender.KAFKA.layout.ConversionPattern", "%-5p: %c - %m%n");
-        hostMissingProps.put("log4j.appender.KAFKA.Topic", "test-topic");
-        hostMissingProps.put("log4j.logger.kafka.log4j", "INFO, KAFKA");
+        // host missing
+        Properties props = new Properties();
+        props.put("log4j.rootLogger", "INFO");
+        props.put("log4j.appender.KAFKA", "org.apache.kafka.log4jappender.KafkaLog4jAppender");
+        props.put("log4j.appender.KAFKA.layout", "org.apache.log4j.PatternLayout");
+        props.put("log4j.appender.KAFKA.layout.ConversionPattern", "%-5p: %c - %m%n");
+        props.put("log4j.appender.KAFKA.Topic", "test-topic");
+        props.put("log4j.logger.kafka.log4j", "INFO, KAFKA");
 
-        assertThrows(ConfigException.class, () -> PropertyConfigurator.configure(hostMissingProps), "Missing properties exception was expected !");
+        try {
+            PropertyConfigurator.configure(props);
+            Assert.fail("Missing properties exception was expected !");
+        } catch (ConfigException ex) {
+            // It's OK!
+        }
 
-        Properties topicMissingProps = new Properties();
-        topicMissingProps.put("log4j.rootLogger", "INFO");
-        topicMissingProps.put("log4j.appender.KAFKA", "org.apache.kafka.log4jappender.KafkaLog4jAppender");
-        topicMissingProps.put("log4j.appender.KAFKA.layout", "org.apache.log4j.PatternLayout");
-        topicMissingProps.put("log4j.appender.KAFKA.layout.ConversionPattern", "%-5p: %c - %m%n");
-        topicMissingProps.put("log4j.appender.KAFKA.brokerList", "127.0.0.1:9093");
-        topicMissingProps.put("log4j.logger.kafka.log4j", "INFO, KAFKA");
+        // topic missing
+        props = new Properties();
+        props.put("log4j.rootLogger", "INFO");
+        props.put("log4j.appender.KAFKA", "org.apache.kafka.log4jappender.KafkaLog4jAppender");
+        props.put("log4j.appender.KAFKA.layout", "org.apache.log4j.PatternLayout");
+        props.put("log4j.appender.KAFKA.layout.ConversionPattern", "%-5p: %c - %m%n");
+        props.put("log4j.appender.KAFKA.brokerList", "127.0.0.1:9093");
+        props.put("log4j.logger.kafka.log4j", "INFO, KAFKA");
 
-        assertThrows(ConfigException.class, () -> PropertyConfigurator.configure(topicMissingProps), "Missing properties exception was expected !");
+        try {
+            PropertyConfigurator.configure(props);
+            Assert.fail("Missing properties exception was expected !");
+        } catch (ConfigException ex) {
+            // It's OK!
+        }
     }
 
     @Test
@@ -80,8 +90,9 @@ public class KafkaLog4jAppenderTest {
         PropertyConfigurator.configure(props);
 
         MockKafkaLog4jAppender mockKafkaLog4jAppender = getMockKafkaLog4jAppender();
-
-        assertEquals(mockKafkaLog4jAppender.getProducerProperties().getProperty(SaslConfigs.SASL_MECHANISM), "PLAIN");
+        assertThat(
+                mockKafkaLog4jAppender.getProducerProperties().getProperty(SaslConfigs.SASL_MECHANISM),
+                equalTo("PLAIN"));
     }
 
     @Test
@@ -96,7 +107,9 @@ public class KafkaLog4jAppenderTest {
         PropertyConfigurator.configure(props);
 
         MockKafkaLog4jAppender mockKafkaLog4jAppender = getMockKafkaLog4jAppender();
-        assertEquals(mockKafkaLog4jAppender.getProducerProperties().getProperty(SaslConfigs.SASL_JAAS_CONFIG), "jaas-config");
+        assertThat(
+                mockKafkaLog4jAppender.getProducerProperties().getProperty(SaslConfigs.SASL_JAAS_CONFIG),
+                equalTo("jaas-config"));
     }
 
     @Test
@@ -117,11 +130,13 @@ public class KafkaLog4jAppenderTest {
         for (int i = 1; i <= 5; ++i) {
             logger.error(getMessage(i));
         }
-        assertEquals(getMockKafkaLog4jAppender().getHistory().size(), 5);
+
+        Assert.assertEquals(
+            5, (getMockKafkaLog4jAppender()).getHistory().size());
     }
 
-    @Test
-    public void testSyncSendAndSimulateProducerFailShouldThrowException() {
+    @Test(expected = RuntimeException.class)
+    public void testLog4jAppendsWithSyncSendAndSimulateProducerFailShouldThrowException() {
         Properties props = getLog4jConfig(true);
         props.put("log4j.appender.KAFKA.IgnoreExceptions", "false");
         PropertyConfigurator.configure(props);
@@ -129,11 +144,11 @@ public class KafkaLog4jAppenderTest {
         MockKafkaLog4jAppender mockKafkaLog4jAppender = getMockKafkaLog4jAppender();
         replaceProducerWithMocked(mockKafkaLog4jAppender, false);
 
-        assertThrows(RuntimeException.class, () -> logger.error(getMessage(0)));
+        logger.error(getMessage(0));
     }
 
     @Test
-    public void testSyncSendWithoutIgnoringExceptionsShouldNotThrowException() {
+    public void testLog4jAppendsWithSyncSendWithoutIgnoringExceptionsShouldNotThrowException() {
         Properties props = getLog4jConfig(true);
         props.put("log4j.appender.KAFKA.IgnoreExceptions", "false");
         PropertyConfigurator.configure(props);
@@ -145,30 +160,35 @@ public class KafkaLog4jAppenderTest {
     }
 
     @Test
-    public void testRealProducerConfigWithSyncSendShouldNotThrowException() {
+    public void testLog4jAppendsWithRealProducerConfigWithSyncSendShouldNotThrowException() {
         Properties props = getLog4jConfigWithRealProducer(true);
         PropertyConfigurator.configure(props);
 
         logger.error(getMessage(0));
     }
 
-    @Test
-    public void testRealProducerConfigWithSyncSendAndNotIgnoringExceptionsShouldThrowException() {
+    @Test(expected = RuntimeException.class)
+    public void testLog4jAppendsWithRealProducerConfigWithSyncSendAndNotIgnoringExceptionsShouldThrowException() {
         Properties props = getLog4jConfigWithRealProducer(false);
         PropertyConfigurator.configure(props);
 
-        assertThrows(RuntimeException.class, () -> logger.error(getMessage(0)));
+        logger.error(getMessage(0));
     }
 
     private void replaceProducerWithMocked(MockKafkaLog4jAppender mockKafkaLog4jAppender, boolean success) {
         @SuppressWarnings("unchecked")
-        MockProducer<byte[], byte[]> producer = mock(MockProducer.class);
-        CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
-        if (success)
-            future.complete(new RecordMetadata(new TopicPartition("tp", 0), 0, 0, 0, 0, 0));
-        else
-            future.completeExceptionally(new TimeoutException("simulated timeout"));
-        when(producer.send(any())).thenReturn(future);
+        MockProducer<byte[], byte[]> producer = EasyMock.niceMock(MockProducer.class);
+        @SuppressWarnings("unchecked")
+        Future<RecordMetadata> futureMock = EasyMock.niceMock(Future.class);
+        try {
+            if (!success)
+                EasyMock.expect(futureMock.get())
+                    .andThrow(new ExecutionException("simulated timeout", new TimeoutException()));
+        } catch (InterruptedException | ExecutionException e) {
+            // just mocking
+        }
+        EasyMock.expect(producer.send(EasyMock.anyObject())).andReturn(futureMock);
+        EasyMock.replay(producer, futureMock);
         // reconfiguring mock appender
         mockKafkaLog4jAppender.setKafkaProducer(producer);
         mockKafkaLog4jAppender.activateOptions();

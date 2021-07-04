@@ -16,25 +16,26 @@
  */
 package kafka.log
 
-import kafka.utils.TestUtils
-import org.apache.kafka.common.message.FetchResponseData
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
-
 import java.io.File
 
-class TransactionIndexTest {
+import kafka.utils.TestUtils
+import org.apache.kafka.common.requests.FetchResponse.AbortedTransaction
+import org.junit.Assert._
+import org.junit.{After, Before, Test}
+import org.scalatest.junit.JUnitSuite
+
+class TransactionIndexTest extends JUnitSuite {
   var file: File = _
   var index: TransactionIndex = _
   val offset = 0L
 
-  @BeforeEach
+  @Before
   def setup(): Unit = {
     file = TestUtils.tempFile()
     index = new TransactionIndex(offset, file)
   }
 
-  @AfterEach
+  @After
   def teardown(): Unit = {
     index.close()
   }
@@ -55,7 +56,7 @@ class TransactionIndexTest {
     assertEquals(abortedTxns ++ List(anotherAbortedTxn), reopenedIndex.allAbortedTxns)
   }
 
-  @Test
+  @Test(expected = classOf[CorruptIndexException])
   def testSanityCheck(): Unit = {
     val abortedTxns = List(
       new AbortedTxn(producerId = 0L, firstOffset = 0, lastOffset = 10, lastStableOffset = 11),
@@ -67,21 +68,19 @@ class TransactionIndexTest {
 
     // open the index with a different starting offset to fake invalid data
     val reopenedIndex = new TransactionIndex(100L, file)
-    assertThrows(classOf[CorruptIndexException], () => reopenedIndex.sanityCheck())
+    reopenedIndex.sanityCheck()
   }
 
-  @Test
+  @Test(expected = classOf[IllegalArgumentException])
   def testLastOffsetMustIncrease(): Unit = {
     index.append(new AbortedTxn(producerId = 1L, firstOffset = 5, lastOffset = 15, lastStableOffset = 13))
-    assertThrows(classOf[IllegalArgumentException], () => index.append(new AbortedTxn(producerId = 0L, firstOffset = 0,
-      lastOffset = 15, lastStableOffset = 11)))
+    index.append(new AbortedTxn(producerId = 0L, firstOffset = 0, lastOffset = 15, lastStableOffset = 11))
   }
 
-  @Test
+  @Test(expected = classOf[IllegalArgumentException])
   def testLastOffsetCannotDecrease(): Unit = {
     index.append(new AbortedTxn(producerId = 1L, firstOffset = 5, lastOffset = 15, lastStableOffset = 13))
-    assertThrows(classOf[IllegalArgumentException], () => index.append(new AbortedTxn(producerId = 0L, firstOffset = 0,
-      lastOffset = 10, lastStableOffset = 11)))
+    index.append(new AbortedTxn(producerId = 0L, firstOffset = 0, lastOffset = 10, lastStableOffset = 11))
   }
 
   @Test
@@ -136,7 +135,7 @@ class TransactionIndexTest {
     assertEquals(abortedTransactions.take(3), index.collectAbortedTxns(0L, 100L).abortedTransactions)
 
     index.reset()
-    assertEquals(List.empty[FetchResponseData.AbortedTransaction], index.collectAbortedTxns(0L, 100L).abortedTransactions)
+    assertEquals(List.empty[AbortedTransaction], index.collectAbortedTxns(0L, 100L).abortedTransactions)
   }
 
   @Test

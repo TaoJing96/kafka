@@ -46,7 +46,6 @@ public final class Cluster {
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
     private final Map<Integer, Node> nodesById;
     private final ClusterResource clusterResource;
-    private final Map<String, Uuid> topicIds;
 
     /**
      * Create a new cluster with the given id, nodes and partitions
@@ -58,7 +57,7 @@ public final class Cluster {
                    Collection<PartitionInfo> partitions,
                    Set<String> unauthorizedTopics,
                    Set<String> internalTopics) {
-        this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, null, Collections.emptyMap());
+        this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, null);
     }
 
     /**
@@ -72,7 +71,7 @@ public final class Cluster {
                    Set<String> unauthorizedTopics,
                    Set<String> internalTopics,
                    Node controller) {
-        this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, controller, Collections.emptyMap());
+        this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, controller);
     }
 
     /**
@@ -87,23 +86,7 @@ public final class Cluster {
                    Set<String> invalidTopics,
                    Set<String> internalTopics,
                    Node controller) {
-        this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller, Collections.emptyMap());
-    }
-
-    /**
-     * Create a new cluster with the given id, nodes, partitions and topicIds
-     * @param nodes The nodes in the cluster
-     * @param partitions Information about a subset of the topic-partitions this cluster hosts
-     */
-    public Cluster(String clusterId,
-                   Collection<Node> nodes,
-                   Collection<PartitionInfo> partitions,
-                   Set<String> unauthorizedTopics,
-                   Set<String> invalidTopics,
-                   Set<String> internalTopics,
-                   Node controller,
-                   Map<String, Uuid> topicIds) {
-        this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller, topicIds);
+        this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller);
     }
 
     private Cluster(String clusterId,
@@ -113,8 +96,7 @@ public final class Cluster {
                     Set<String> unauthorizedTopics,
                     Set<String> invalidTopics,
                     Set<String> internalTopics,
-                    Node controller,
-                    Map<String, Uuid> topicIds) {
+                    Node controller) {
         this.isBootstrapConfigured = isBootstrapConfigured;
         this.clusterResource = new ClusterResource(clusterId);
         // make a randomized, unmodifiable copy of the nodes
@@ -140,15 +122,18 @@ public final class Cluster {
         Map<String, List<PartitionInfo>> tmpPartitionsByTopic = new HashMap<>();
         for (PartitionInfo p : partitions) {
             tmpPartitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
-            tmpPartitionsByTopic.computeIfAbsent(p.topic(), topic -> new ArrayList<>()).add(p);
-
-            // The leader may not be known
-            if (p.leader() == null || p.leader().isEmpty())
-                continue;
-
-            // If it is known, its node information should be available
-            List<PartitionInfo> partitionsForNode = Objects.requireNonNull(tmpPartitionsByNode.get(p.leader().id()));
-            partitionsForNode.add(p);
+            List<PartitionInfo> partitionsForTopic = tmpPartitionsByTopic.get(p.topic());
+            if (partitionsForTopic == null) {
+                partitionsForTopic = new ArrayList<>();
+                tmpPartitionsByTopic.put(p.topic(), partitionsForTopic);
+            }
+            partitionsForTopic.add(p);
+            if (p.leader() != null) {
+                // The broker guarantees that if a partition has a non-null leader, it is one of the brokers returned
+                // in the metadata response
+                List<PartitionInfo> partitionsForNode = Objects.requireNonNull(tmpPartitionsByNode.get(p.leader().id()));
+                partitionsForNode.add(p);
+            }
         }
 
         // Update the values of `tmpPartitionsByNode` to contain unmodifiable lists
@@ -183,7 +168,6 @@ public final class Cluster {
         this.partitionsByTopic = Collections.unmodifiableMap(tmpPartitionsByTopic);
         this.availablePartitionsByTopic = Collections.unmodifiableMap(tmpAvailablePartitionsByTopic);
         this.partitionsByNode = Collections.unmodifiableMap(tmpPartitionsByNode);
-        this.topicIds = Collections.unmodifiableMap(topicIds);
 
         this.unauthorizedTopics = Collections.unmodifiableSet(unauthorizedTopics);
         this.invalidTopics = Collections.unmodifiableSet(invalidTopics);
@@ -210,7 +194,7 @@ public final class Cluster {
         for (InetSocketAddress address : addresses)
             nodes.add(new Node(nodeId--, address.getHostString(), address.getPort()));
         return new Cluster(null, true, nodes, new ArrayList<>(0),
-            Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), null, Collections.emptyMap());
+            Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), null);
     }
 
     /**
@@ -232,9 +216,9 @@ public final class Cluster {
     }
 
     /**
-     * Get the node by the node id (or null if the node is not online or does not exist)
+     * Get the node by the node id (or null if no such node exists)
      * @param id The id of the node
-     * @return The node, or null if the node is not online or does not exist
+     * @return The node, or null if no such node exists
      */
     public Node nodeById(int id) {
         return this.nodesById.get(id);
@@ -244,7 +228,7 @@ public final class Cluster {
      * Get the node by node id if the replica for the given partition is online
      * @param partition
      * @param id
-     * @return the node
+     * @return
      */
     public Optional<Node> nodeIfOnline(TopicPartition partition, int id) {
         Node node = nodeById(id);
@@ -344,14 +328,6 @@ public final class Cluster {
 
     public Node controller() {
         return controller;
-    }
-
-    public Collection<Uuid> topicIds() {
-        return topicIds.values();
-    }
-
-    public Uuid topicId(String topic) {
-        return topicIds.getOrDefault(topic, Uuid.ZERO_UUID);
     }
 
     @Override

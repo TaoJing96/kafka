@@ -75,17 +75,16 @@ public class StateTracker {
         private final long pausedTotalTimeMs;
         private final long failedTotalTimeMs;
         private final long destroyedTotalTimeMs;
-        private final long restartingTotalTimeMs;
 
         /**
          * The initial StateChange instance before any state has changed.
          */
         StateChange() {
-            this(null, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+            this(null, 0L, 0L, 0L, 0L, 0L, 0L);
         }
 
         StateChange(State state, long startTime, long unassignedTotalTimeMs, long runningTotalTimeMs,
-                            long pausedTotalTimeMs, long failedTotalTimeMs, long destroyedTotalTimeMs, long restartingTotalTimeMs) {
+                            long pausedTotalTimeMs, long failedTotalTimeMs, long destroyedTotalTimeMs) {
             this.state = state;
             this.startTime = startTime;
             this.unassignedTotalTimeMs = unassignedTotalTimeMs;
@@ -93,7 +92,6 @@ public class StateTracker {
             this.pausedTotalTimeMs = pausedTotalTimeMs;
             this.failedTotalTimeMs = failedTotalTimeMs;
             this.destroyedTotalTimeMs = destroyedTotalTimeMs;
-            this.restartingTotalTimeMs = restartingTotalTimeMs;
         }
 
         /**
@@ -106,7 +104,7 @@ public class StateTracker {
          */
         public StateChange newState(State state, long now) {
             if (this.state == null) {
-                return new StateChange(state, now, 0L, 0L, 0L, 0L, 0L, 0L);
+                return new StateChange(state, now, 0L, 0L, 0L, 0L, 0L);
             }
             if (state == this.state) {
                 return this;
@@ -116,7 +114,6 @@ public class StateTracker {
             long pausedTime = this.pausedTotalTimeMs;
             long failedTime = this.failedTotalTimeMs;
             long destroyedTime = this.destroyedTotalTimeMs;
-            long restartingTime = this.restartingTotalTimeMs;
             long duration = now - startTime;
             switch (this.state) {
                 case UNASSIGNED:
@@ -134,11 +131,8 @@ public class StateTracker {
                 case DESTROYED:
                     destroyedTime += duration;
                     break;
-                case RESTARTING:
-                    restartingTime += duration;
-                    break;
             }
-            return new StateChange(state, now, unassignedTime, runningTime, pausedTime, failedTime, destroyedTime, restartingTime);
+            return new StateChange(state, now, unassignedTime, runningTime, pausedTime, failedTime, destroyedTime);
         }
 
         /**
@@ -170,12 +164,9 @@ public class StateTracker {
                 case DESTROYED:
                     durationDesired += destroyedTotalTimeMs;
                     break;
-                case RESTARTING:
-                    durationDesired += restartingTotalTimeMs;
-                    break;
             }
             long total = durationCurrent + unassignedTotalTimeMs + runningTotalTimeMs + pausedTotalTimeMs +
-                                 failedTotalTimeMs + destroyedTotalTimeMs + restartingTotalTimeMs;
+                                 failedTotalTimeMs + destroyedTotalTimeMs;
             return total == 0.0d ? 0.0d : (double) durationDesired / total;
         }
     }

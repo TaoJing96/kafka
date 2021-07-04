@@ -17,13 +17,12 @@
 package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.common.utils.Serializer;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.io.IOException;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 /**
  * This test case ensures OffsetAndMetadata class is serializable and is serialization compatible.
@@ -32,9 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 public class OffsetAndMetadataTest {
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testInvalidNegativeOffset() {
-        assertThrows(IllegalArgumentException.class, () -> new OffsetAndMetadata(-239L, Optional.of(15), ""));
+        new OffsetAndMetadata(-239L, Optional.of(15), "");
     }
 
     @Test

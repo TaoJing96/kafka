@@ -31,7 +31,6 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
-import org.apache.kafka.common.utils.Utils;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -104,7 +103,7 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
                     OAuthBearerValidationResult.newFailure("No expiration time in JWT"));
         lifetime = convertClaimTimeInSecondsToMs(expirationTimeSeconds);
         String principalName = claim(this.principalClaimName, String.class);
-        if (Utils.isBlank(principalName))
+        if (principalName == null || principalName.trim().isEmpty())
             throw new OAuthBearerIllegalTokenException(OAuthBearerValidationResult
                     .newFailure("No principal name in JWT claim: " + this.principalClaimName));
         this.principalName = principalName;
@@ -346,7 +345,7 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
         String scopeClaimName = scopeClaimName();
         if (isClaimType(scopeClaimName, String.class)) {
             String scopeClaimValue = claim(scopeClaimName, String.class);
-            if (Utils.isBlank(scopeClaimValue))
+            if (scopeClaimValue.trim().isEmpty())
                 return Collections.emptySet();
             else {
                 Set<String> retval = new HashSet<>();
@@ -361,7 +360,7 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
         List<String> stringList = (List<String>) scopeClaimValue;
         Set<String> retval = new HashSet<>();
         for (String scope : stringList) {
-            if (!Utils.isBlank(scope)) {
+            if (scope != null && !scope.trim().isEmpty()) {
                 retval.add(scope.trim());
             }
         }

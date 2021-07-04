@@ -54,7 +54,6 @@ public class FetcherMetricsRegistry {
     public MetricNameTemplate partitionRecordsLead;
     public MetricNameTemplate partitionRecordsLeadMin;
     public MetricNameTemplate partitionRecordsLeadAvg;
-    public MetricNameTemplate partitionPreferredReadReplica;
 
     public FetcherMetricsRegistry() {
         this(new HashSet<String>(), "");
@@ -140,9 +139,7 @@ public class FetcherMetricsRegistry {
                 "The min lead of the partition", partitionTags);
         this.partitionRecordsLeadAvg = new MetricNameTemplate("records-lead-avg", groupName,
                 "The average lead of the partition", partitionTags);
-        this.partitionPreferredReadReplica = new MetricNameTemplate(
-                "preferred-read-replica", "consumer-fetch-manager-metrics",
-                "The current read replica for the partition, or -1 if reading from leader", partitionTags);
+
     }
 
     public List<MetricNameTemplate> getAllTemplates() {
@@ -174,8 +171,7 @@ public class FetcherMetricsRegistry {
             partitionRecordsLagMax,
             partitionRecordsLead,
             partitionRecordsLeadMin,
-            partitionRecordsLeadAvg,
-            partitionPreferredReadReplica
+            partitionRecordsLeadAvg
         );
     }
 

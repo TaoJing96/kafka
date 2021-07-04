@@ -31,14 +31,11 @@ import java.util.NoSuchElementException;
 abstract class AbstractMergedSortedCacheStoreIterator<K, KS, V, VS> implements KeyValueIterator<K, V> {
     private final PeekingKeyValueIterator<Bytes, LRUCacheEntry> cacheIterator;
     private final KeyValueIterator<KS, VS> storeIterator;
-    private final boolean forward;
 
     AbstractMergedSortedCacheStoreIterator(final PeekingKeyValueIterator<Bytes, LRUCacheEntry> cacheIterator,
-                                           final KeyValueIterator<KS, VS> storeIterator,
-                                           final boolean forward) {
+                                           final KeyValueIterator<KS, VS> storeIterator) {
         this.cacheIterator = cacheIterator;
         this.storeIterator = storeIterator;
-        this.forward = forward;
     }
 
     abstract int compare(final Bytes cacheKey, final KS storeKey);
@@ -90,32 +87,14 @@ abstract class AbstractMergedSortedCacheStoreIterator<K, KS, V, VS> implements K
         }
 
         final int comparison = compare(nextCacheKey, nextStoreKey);
-        return chooseNextValue(nextCacheKey, nextStoreKey, comparison);
-    }
-
-    private KeyValue<K, V> chooseNextValue(final Bytes nextCacheKey,
-                                           final KS nextStoreKey,
-                                           final int comparison) {
-        if (forward) {
-            if (comparison > 0) {
-                return nextStoreValue(nextStoreKey);
-            } else if (comparison < 0) {
-                return nextCacheValue(nextCacheKey);
-            } else {
-                // skip the same keyed element
-                storeIterator.next();
-                return nextCacheValue(nextCacheKey);
-            }
+        if (comparison > 0) {
+            return nextStoreValue(nextStoreKey);
+        } else if (comparison < 0) {
+            return nextCacheValue(nextCacheKey);
         } else {
-            if (comparison < 0) {
-                return nextStoreValue(nextStoreKey);
-            } else if (comparison > 0) {
-                return nextCacheValue(nextCacheKey);
-            } else {
-                // skip the same keyed element
-                storeIterator.next();
-                return nextCacheValue(nextCacheKey);
-            }
+            // skip the same keyed element
+            storeIterator.next();
+            return nextCacheValue(nextCacheKey);
         }
     }
 
@@ -157,33 +136,20 @@ abstract class AbstractMergedSortedCacheStoreIterator<K, KS, V, VS> implements K
         }
 
         final int comparison = compare(nextCacheKey, nextStoreKey);
-        return chooseNextKey(nextCacheKey, nextStoreKey, comparison);
+        if (comparison > 0) {
+            return deserializeStoreKey(nextStoreKey);
+        } else if (comparison < 0) {
+            return deserializeCacheKey(nextCacheKey);
+        } else {
+            // skip the same keyed element
+            storeIterator.next();
+            return deserializeCacheKey(nextCacheKey);
+        }
     }
 
-    private K chooseNextKey(final Bytes nextCacheKey,
-                            final KS nextStoreKey,
-                            final int comparison) {
-        if (forward) {
-            if (comparison > 0) {
-                return deserializeStoreKey(nextStoreKey);
-            } else if (comparison < 0) {
-                return deserializeCacheKey(nextCacheKey);
-            } else {
-                // skip the same keyed element
-                storeIterator.next();
-                return deserializeCacheKey(nextCacheKey);
-            }
-        } else {
-            if (comparison < 0) {
-                return deserializeStoreKey(nextStoreKey);
-            } else if (comparison > 0) {
-                return deserializeCacheKey(nextCacheKey);
-            } else {
-                // skip the same keyed element
-                storeIterator.next();
-                return deserializeCacheKey(nextCacheKey);
-            }
-        }
+    @Override
+    public void remove() {
+        throw new UnsupportedOperationException("remove() is not supported in " + getClass().getName());
     }
 
     @Override
@@ -192,3 +158,4 @@ abstract class AbstractMergedSortedCacheStoreIterator<K, KS, V, VS> implements K
         storeIterator.close();
     }
 }
+

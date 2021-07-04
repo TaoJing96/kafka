@@ -27,29 +27,25 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 public class ProducerMetadata extends Metadata {
-    // If a topic hasn't been accessed for this many milliseconds, it is removed from the cache.
-    private final long metadataIdleMs;
+    private static final long TOPIC_EXPIRY_NEEDS_UPDATE = -1L;
+    static final long TOPIC_EXPIRY_MS = 5 * 60 * 1000;
 
     /* Topics with expiry time */
     private final Map<String, Long> topics = new HashMap<>();
-    private final Set<String> newTopics = new HashSet<>();
     private final Logger log;
     private final Time time;
 
     public ProducerMetadata(long refreshBackoffMs,
                             long metadataExpireMs,
-                            long metadataIdleMs,
                             LogContext logContext,
                             ClusterResourceListeners clusterResourceListeners,
                             Time time) {
         super(refreshBackoffMs, metadataExpireMs, logContext, clusterResourceListeners);
-        this.metadataIdleMs = metadataIdleMs;
         this.log = logContext.logger(ProducerMetadata.class);
         this.time = time;
     }
@@ -59,35 +55,16 @@ public class ProducerMetadata extends Metadata {
         return new MetadataRequest.Builder(new ArrayList<>(topics.keySet()), true);
     }
 
-    @Override
-    public synchronized MetadataRequest.Builder newMetadataRequestBuilderForNewTopics() {
-        return new MetadataRequest.Builder(new ArrayList<>(newTopics), true);
-    }
-
-    public synchronized void add(String topic, long nowMs) {
+    public synchronized void add(String topic) {
         Objects.requireNonNull(topic, "topic cannot be null");
-        if (topics.put(topic, nowMs + metadataIdleMs) == null) {
-            newTopics.add(topic);
+        if (topics.put(topic, TOPIC_EXPIRY_NEEDS_UPDATE) == null) {
             requestUpdateForNewTopics();
-        }
-    }
-
-    public synchronized int requestUpdateForTopic(String topic) {
-        if (newTopics.contains(topic)) {
-            return requestUpdateForNewTopics();
-        } else {
-            return requestUpdate();
         }
     }
 
     // Visible for testing
     synchronized Set<String> topics() {
         return topics.keySet();
-    }
-
-    // Visible for testing
-    synchronized Set<String> newTopics() {
-        return newTopics;
     }
 
     public synchronized boolean containsTopic(String topic) {
@@ -99,7 +76,8 @@ public class ProducerMetadata extends Metadata {
         Long expireMs = topics.get(topic);
         if (expireMs == null) {
             return false;
-        } else if (newTopics.contains(topic)) {
+        } else if (expireMs == TOPIC_EXPIRY_NEEDS_UPDATE) {
+            topics.put(topic, nowMs + TOPIC_EXPIRY_MS);
             return true;
         } else if (expireMs <= nowMs) {
             log.debug("Removing unused topic {} from the metadata list, expiryMs {} now {}", topic, expireMs, nowMs);
@@ -127,24 +105,16 @@ public class ProducerMetadata extends Metadata {
     }
 
     @Override
-    public synchronized void update(int requestVersion, MetadataResponse response, boolean isPartialUpdate, long nowMs) {
-        super.update(requestVersion, response, isPartialUpdate, nowMs);
-
-        // Remove all topics in the response that are in the new topic set. Note that if an error was encountered for a
-        // new topic's metadata, then any work to resolve the error will include the topic in a full metadata update.
-        if (!newTopics.isEmpty()) {
-            for (MetadataResponse.TopicMetadata metadata : response.topicMetadata()) {
-                newTopics.remove(metadata.topic());
-            }
-        }
-
+    public synchronized void update(int requestVersion, MetadataResponse response, long now) {
+        super.update(requestVersion, response, now);
         notifyAll();
     }
 
     @Override
-    public synchronized void fatalError(KafkaException fatalException) {
-        super.fatalError(fatalException);
-        notifyAll();
+    public synchronized void failedUpdate(long now, KafkaException fatalException) {
+        super.failedUpdate(now, fatalException);
+        if (fatalException != null)
+            notifyAll();
     }
 
     /**

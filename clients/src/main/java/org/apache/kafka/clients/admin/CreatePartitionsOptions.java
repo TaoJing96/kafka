@@ -22,15 +22,14 @@ import org.apache.kafka.common.annotation.InterfaceStability;
 import java.util.Map;
 
 /**
- * Options for {@link Admin#createPartitions(Map)}.
+ * Options for {@link AdminClient#createPartitions(Map)}.
  *
- * The API of this class is evolving, see {@link Admin} for details.
+ * The API of this class is evolving, see {@link AdminClient} for details.
  */
 @InterfaceStability.Evolving
 public class CreatePartitionsOptions extends AbstractOptions<CreatePartitionsOptions> {
 
     private boolean validateOnly = false;
-    private boolean retryOnQuotaViolation = true;
 
     public CreatePartitionsOptions() {
     }
@@ -48,20 +47,5 @@ public class CreatePartitionsOptions extends AbstractOptions<CreatePartitionsOpt
     public CreatePartitionsOptions validateOnly(boolean validateOnly) {
         this.validateOnly = validateOnly;
         return this;
-    }
-
-    /**
-     * Set to true if quota violation should be automatically retried.
-     */
-    public CreatePartitionsOptions retryOnQuotaViolation(boolean retryOnQuotaViolation) {
-        this.retryOnQuotaViolation = retryOnQuotaViolation;
-        return this;
-    }
-
-    /**
-     * Returns true if quota violation should be automatically retried.
-     */
-    public boolean shouldRetryOnQuotaViolation() {
-        return retryOnQuotaViolation;
     }
 }

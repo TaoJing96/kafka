@@ -16,57 +16,102 @@
  */
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Schema;
+import org.apache.kafka.common.protocol.types.Struct;
+
 import java.nio.ByteBuffer;
 
-import org.apache.kafka.common.message.RenewDelegationTokenRequestData;
-import org.apache.kafka.common.message.RenewDelegationTokenResponseData;
-import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
-import org.apache.kafka.common.protocol.Errors;
+import static org.apache.kafka.common.protocol.types.Type.BYTES;
+import static org.apache.kafka.common.protocol.types.Type.INT64;
 
 public class RenewDelegationTokenRequest extends AbstractRequest {
 
-    private final RenewDelegationTokenRequestData data;
+    private static final String HMAC_KEY_NAME = "hmac";
+    private static final String RENEW_TIME_PERIOD_KEY_NAME = "renew_time_period";
+    private final ByteBuffer hmac;
+    private final long renewTimePeriod;
 
-    public RenewDelegationTokenRequest(RenewDelegationTokenRequestData data, short version) {
+    public static final Schema TOKEN_RENEW_REQUEST_V0 = new Schema(
+        new Field(HMAC_KEY_NAME, BYTES, "HMAC of the delegation token to be renewed."),
+        new Field(RENEW_TIME_PERIOD_KEY_NAME, INT64, "Renew time period in milli seconds."));
+
+    /**
+     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
+     */
+    public static final Schema TOKEN_RENEW_REQUEST_V1 = TOKEN_RENEW_REQUEST_V0;
+
+    private RenewDelegationTokenRequest(short version, ByteBuffer hmac, long renewTimePeriod) {
         super(ApiKeys.RENEW_DELEGATION_TOKEN, version);
-        this.data = data;
+
+        this.hmac = hmac;
+        this.renewTimePeriod = renewTimePeriod;
+    }
+
+    public RenewDelegationTokenRequest(Struct struct, short versionId) {
+        super(ApiKeys.RENEW_DELEGATION_TOKEN, versionId);
+
+        hmac = struct.getBytes(HMAC_KEY_NAME);
+        renewTimePeriod = struct.getLong(RENEW_TIME_PERIOD_KEY_NAME);
     }
 
     public static RenewDelegationTokenRequest parse(ByteBuffer buffer, short version) {
-        return new RenewDelegationTokenRequest(new RenewDelegationTokenRequestData(
-            new ByteBufferAccessor(buffer), version), version);
+        return new RenewDelegationTokenRequest(ApiKeys.RENEW_DELEGATION_TOKEN.parseRequest(version, buffer), version);
+    }
+
+    public static Schema[] schemaVersions() {
+        return new Schema[] {TOKEN_RENEW_REQUEST_V0, TOKEN_RENEW_REQUEST_V1};
     }
 
     @Override
-    public RenewDelegationTokenRequestData data() {
-        return data;
+    protected Struct toStruct() {
+        short version = version();
+        Struct struct = new Struct(ApiKeys.RENEW_DELEGATION_TOKEN.requestSchema(version));
+
+        struct.set(HMAC_KEY_NAME, hmac);
+        struct.set(RENEW_TIME_PERIOD_KEY_NAME, renewTimePeriod);
+
+        return struct;
     }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        return new RenewDelegationTokenResponse(
-                new RenewDelegationTokenResponseData()
-                    .setThrottleTimeMs(throttleTimeMs)
-                    .setErrorCode(Errors.forException(e).code()));
+        return new RenewDelegationTokenResponse(throttleTimeMs, Errors.forException(e));
+    }
+
+    public ByteBuffer hmac() {
+        return hmac;
+    }
+
+    public long renewTimePeriod() {
+        return renewTimePeriod;
     }
 
     public static class Builder extends AbstractRequest.Builder<RenewDelegationTokenRequest> {
-        private final RenewDelegationTokenRequestData data;
+        private final ByteBuffer hmac;
+        private final long renewTimePeriod;
 
-        public Builder(RenewDelegationTokenRequestData data) {
+        public Builder(byte[] hmac, long renewTimePeriod) {
             super(ApiKeys.RENEW_DELEGATION_TOKEN);
-            this.data = data;
+            this.hmac = ByteBuffer.wrap(hmac);
+            this.renewTimePeriod = renewTimePeriod;
         }
 
         @Override
         public RenewDelegationTokenRequest build(short version) {
-            return new RenewDelegationTokenRequest(data, version);
+            return new RenewDelegationTokenRequest(version, hmac, renewTimePeriod);
         }
 
         @Override
         public String toString() {
-            return data.toString();
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type: RenewDelegationTokenRequest").
+                append(", hmac=").append(hmac).
+                append(", renewTimePeriod=").append(renewTimePeriod).
+                append(")");
+            return bld.toString();
         }
     }
 }

@@ -26,7 +26,7 @@ import java.util.Map;
 
 public class MaterializedInternal<K, V, S extends StateStore> extends Materialized<K, V, S> {
 
-    private final boolean queryable;
+    private final boolean queriable;
 
     public MaterializedInternal(final Materialized<K, V, S> materialized) {
         this(materialized, null, null);
@@ -39,14 +39,14 @@ public class MaterializedInternal<K, V, S extends StateStore> extends Materializ
 
         // if storeName is not provided, the corresponding KTable would never be queryable;
         // but we still need to provide an internal name for it in case we materialize.
-        queryable = storeName() != null;
-        if (!queryable && nameProvider != null) {
+        queriable = storeName() != null;
+        if (!queriable && nameProvider != null) {
             storeName = nameProvider.newStoreName(generatedStorePrefix);
         }
     }
 
     public String queryableStoreName() {
-        return queryable ? storeName() : null;
+        return queriable ? storeName() : null;
     }
 
     public String storeName() {

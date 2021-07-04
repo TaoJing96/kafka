@@ -31,7 +31,7 @@ interface GlobalStateMaintainer {
 
     void flushState();
 
-    void close(final boolean wipeStateStore) throws IOException;
+    void close() throws IOException;
 
     void update(ConsumerRecord<byte[], byte[]> record);
 }

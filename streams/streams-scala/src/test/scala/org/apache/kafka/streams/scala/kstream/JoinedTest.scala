@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2018 Joan Goyeau.
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -16,29 +18,29 @@
  */
 package org.apache.kafka.streams.scala.kstream
 
-import org.apache.kafka.streams.scala.serialization.Serdes
-import org.apache.kafka.streams.scala.serialization.Serdes._
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
+import org.apache.kafka.streams.scala.Serdes
+import org.apache.kafka.streams.scala.Serdes._
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{FlatSpec, Matchers}
 
-class JoinedTest {
+@RunWith(classOf[JUnitRunner])
+class JoinedTest extends FlatSpec with Matchers {
 
-  @Test
-  def testCreateJoined(): Unit = {
+  "Create a Joined" should "create a Joined with Serdes" in {
     val joined: Joined[String, Long, Int] = Joined.`with`[String, Long, Int]
 
-    assertEquals(joined.keySerde.getClass, Serdes.stringSerde.getClass)
-    assertEquals(joined.valueSerde.getClass, Serdes.longSerde.getClass)
-    assertEquals(joined.otherValueSerde.getClass, Serdes.intSerde.getClass)
+    joined.keySerde.getClass shouldBe Serdes.String.getClass
+    joined.valueSerde.getClass shouldBe Serdes.Long.getClass
+    joined.otherValueSerde.getClass shouldBe Serdes.Integer.getClass
   }
 
-  @Test
-  def testCreateJoinedWithSerdesAndRepartitionTopicName(): Unit = {
+  "Create a Joined" should "create a Joined with Serdes and repartition topic name" in {
     val repartitionTopicName = "repartition-topic"
     val joined: Joined[String, Long, Int] = Joined.`with`(repartitionTopicName)
 
-    assertEquals(joined.keySerde.getClass, Serdes.stringSerde.getClass)
-    assertEquals(joined.valueSerde.getClass, Serdes.longSerde.getClass)
-    assertEquals(joined.otherValueSerde.getClass, Serdes.intSerde.getClass)
+    joined.keySerde.getClass shouldBe Serdes.String.getClass
+    joined.valueSerde.getClass shouldBe Serdes.Long.getClass
+    joined.otherValueSerde.getClass shouldBe Serdes.Integer.getClass
   }
 }

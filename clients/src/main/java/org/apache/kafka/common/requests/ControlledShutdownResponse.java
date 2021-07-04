@@ -20,10 +20,11 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.message.ControlledShutdownResponseData;
 import org.apache.kafka.common.message.ControlledShutdownResponseData.RemainingPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,8 +41,11 @@ public class ControlledShutdownResponse extends AbstractResponse {
     private final ControlledShutdownResponseData data;
 
     public ControlledShutdownResponse(ControlledShutdownResponseData data) {
-        super(ApiKeys.CONTROLLED_SHUTDOWN);
         this.data = data;
+    }
+
+    public ControlledShutdownResponse(Struct struct, short version) {
+        this.data = new ControlledShutdownResponseData(struct, version);
     }
 
     public Errors error() {
@@ -50,19 +54,18 @@ public class ControlledShutdownResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return errorCounts(error());
-    }
-
-    @Override
-    public int throttleTimeMs() {
-        return DEFAULT_THROTTLE_TIME;
+        return Collections.singletonMap(error(), 1);
     }
 
     public static ControlledShutdownResponse parse(ByteBuffer buffer, short version) {
-        return new ControlledShutdownResponse(new ControlledShutdownResponseData(new ByteBufferAccessor(buffer), version));
+        return new ControlledShutdownResponse(ApiKeys.CONTROLLED_SHUTDOWN.parseResponse(version, buffer), version);
     }
 
     @Override
+    protected Struct toStruct(short version) {
+        return data.toStruct(version);
+    }
+
     public ControlledShutdownResponseData data() {
         return data;
     }

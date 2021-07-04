@@ -18,7 +18,6 @@
 package org.apache.kafka.connect.rest.basic.auth.extension;
 
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,7 +59,7 @@ public class PropertyFileLoginModule implements LoginModule {
     public void initialize(Subject subject, CallbackHandler callbackHandler, Map<String, ?> sharedState, Map<String, ?> options) {
         this.callbackHandler = callbackHandler;
         fileName = (String) options.get(FILE_OPTIONS);
-        if (Utils.isBlank(fileName)) {
+        if (fileName == null || fileName.trim().isEmpty()) {
             throw new ConfigException("Property Credentials file must be specified");
         }
 

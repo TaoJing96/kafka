@@ -34,16 +34,9 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
     awaitShutdown()
   }
 
-  def isShutdownInitiated: Boolean = shutdownInitiated.getCount == 0
-
-  def isShutdownComplete: Boolean = shutdownComplete.getCount == 0
-
-  /**
-    * @return true if there has been an unexpected error and the thread shut down
-    */
-  // mind that run() might set both when we're shutting down the broker
-  // but the return value of this function at that point wouldn't matter
-  def isThreadFailed: Boolean = isShutdownComplete && !isShutdownInitiated
+  def isShutdownComplete: Boolean = {
+    shutdownComplete.getCount == 0
+  }
 
   def initiateShutdown(): Boolean = {
     this.synchronized {
@@ -62,7 +55,7 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
    * After calling initiateShutdown(), use this API to wait until the shutdown is complete
    */
   def awaitShutdown(): Unit = {
-    if (!isShutdownInitiated)
+    if (shutdownInitiated.getCount != 0)
       throw new IllegalStateException("initiateShutdown() was not called before awaitShutdown()")
     else {
       if (isStarted)
@@ -109,5 +102,7 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
     info("Stopped")
   }
 
-  def isRunning: Boolean = !isShutdownInitiated
+  def isRunning: Boolean = {
+    shutdownInitiated.getCount() != 0
+  }
 }

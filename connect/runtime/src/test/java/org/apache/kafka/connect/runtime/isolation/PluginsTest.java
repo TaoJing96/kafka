@@ -50,7 +50,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class PluginsTest {
@@ -77,6 +76,10 @@ public class PluginsTest {
         props.put("value.converter." + JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "true");
         props.put("key.converter.extra.config", "foo1");
         props.put("value.converter.extra.config", "foo2");
+        props.put(WorkerConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG, TestInternalConverter.class.getName());
+        props.put(WorkerConfig.INTERNAL_VALUE_CONVERTER_CLASS_CONFIG, TestInternalConverter.class.getName());
+        props.put("internal.key.converter.extra.config", "bar1");
+        props.put("internal.value.converter.extra.config", "bar2");
         props.put(WorkerConfig.HEADER_CONVERTER_CLASS_CONFIG, TestHeaderConverter.class.getName());
         props.put("header.converter.extra.config", "baz");
 
@@ -103,9 +106,17 @@ public class PluginsTest {
     @SuppressWarnings("deprecation")
     @Test
     public void shouldInstantiateAndConfigureInternalConverters() {
-        instantiateAndConfigureInternalConverter(true, Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false"));
-        // Validate schemas.enable is set to false
-        assertEquals("false", internalConverter.configs.get(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG));
+        instantiateAndConfigureInternalConverter(WorkerConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG, ClassLoaderUsage.CURRENT_CLASSLOADER);
+        // Validate schemas.enable is defaulted to false for internal converter
+        assertEquals(false, internalConverter.configs.get(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG));
+        // Validate internal converter properties can still be set
+        assertEquals("bar1", internalConverter.configs.get("extra.config"));
+
+        instantiateAndConfigureInternalConverter(WorkerConfig.INTERNAL_VALUE_CONVERTER_CLASS_CONFIG, ClassLoaderUsage.PLUGINS);
+        // Validate schemas.enable is defaulted to false for internal converter
+        assertEquals(false, internalConverter.configs.get(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG));
+        // Validate internal converter properties can still be set
+        assertEquals("bar2", internalConverter.configs.get("extra.config"));
     }
 
     @Test
@@ -173,15 +184,15 @@ public class PluginsTest {
         assertTrue(headerConverter instanceof SimpleHeaderConverter);
     }
 
-    @Test
+    @Test(expected = ConnectException.class)
     public void shouldThrowIfPluginThrows() {
         TestPlugins.assertAvailable();
 
-        assertThrows(ConnectException.class, () -> plugins.newPlugin(
+        plugins.newPlugin(
             TestPlugins.ALWAYS_THROW_EXCEPTION,
             new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
             Converter.class
-        ));
+        );
     }
 
     @Test
@@ -240,11 +251,11 @@ public class PluginsTest {
         assertPluginClassLoaderAlwaysActive(samples);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void shouldFailToFindConverterInCurrentClassloader() {
         TestPlugins.assertAvailable();
         props.put(WorkerConfig.KEY_CONVERTER_CLASS_CONFIG, TestPlugins.SAMPLING_CONVERTER);
-        assertThrows(ConfigException.class, this::createConfig);
+        createConfig();
     }
 
     @Test
@@ -363,8 +374,8 @@ public class PluginsTest {
         assertNotNull(headerConverter);
     }
 
-    protected void instantiateAndConfigureInternalConverter(boolean isKey, Map<String, String> config) {
-        internalConverter = (TestInternalConverter) plugins.newInternalConverter(isKey, TestInternalConverter.class.getName(), config);
+    protected void instantiateAndConfigureInternalConverter(String configPropName, ClassLoaderUsage classLoaderUsage) {
+        internalConverter = (TestInternalConverter) plugins.newConverter(config, configPropName, classLoaderUsage);
         assertNotNull(internalConverter);
     }
 
@@ -463,7 +474,6 @@ public class PluginsTest {
     public static class TestInternalConverter extends JsonConverter {
         public Map<String, ?> configs;
 
-        @Override
         public void configure(Map<String, ?> configs) {
             this.configs = configs;
             super.configure(configs);

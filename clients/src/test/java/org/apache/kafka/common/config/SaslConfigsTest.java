@@ -16,14 +16,13 @@
  */
 package org.apache.kafka.common.config;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 public class SaslConfigsTest {
     @Test
@@ -67,59 +66,59 @@ public class SaslConfigsTest {
         assertEquals(Short.valueOf("3600"), vals.get(SaslConfigs.SASL_LOGIN_REFRESH_BUFFER_SECONDS));
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshWindowFactorMinValueIsReallyMinimum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_WINDOW_FACTOR, "0.499999");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshWindowFactorMaxValueIsReallyMaximum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_WINDOW_FACTOR, "1.0001");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshWindowJitterMinValueIsReallyMinimum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_WINDOW_JITTER, "-0.000001");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshWindowJitterMaxValueIsReallyMaximum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_WINDOW_JITTER, "0.251");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshMinPeriodSecondsMinValueIsReallyMinimum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_MIN_PERIOD_SECONDS, "-1");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshMinPeriodSecondsMaxValueIsReallyMaximum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_MIN_PERIOD_SECONDS, "901");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshBufferSecondsMinValueIsReallyMinimum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_BUFFER_SECONDS, "-1");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 
-    @Test
+    @Test(expected = ConfigException.class)
     public void testSaslLoginRefreshBufferSecondsMaxValueIsReallyMaximum() {
         Map<Object, Object> props = new HashMap<>();
         props.put(SaslConfigs.SASL_LOGIN_REFRESH_BUFFER_SECONDS, "3601");
-        assertThrows(ConfigException.class, () -> new ConfigDef().withClientSaslSupport().parse(props));
+        new ConfigDef().withClientSaslSupport().parse(props);
     }
 }

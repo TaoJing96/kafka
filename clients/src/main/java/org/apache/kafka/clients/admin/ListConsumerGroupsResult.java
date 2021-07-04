@@ -25,9 +25,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 
 /**
- * The result of the {@link Admin#listConsumerGroups()} call.
+ * The result of the {@link AdminClient#listConsumerGroups()} call.
  * <p>
- * The API of this class is evolving, see {@link Admin} for details.
+ * The API of this class is evolving, see {@link AdminClient} for details.
  */
 @InterfaceStability.Evolving
 public class ListConsumerGroupsResult {

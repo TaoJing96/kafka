@@ -18,8 +18,8 @@ package kafka.coordinator.group
 
 import java.util.Arrays
 
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
+import org.junit.Assert._
+import org.junit.Test
 
 class MemberMetadataTest {
   val groupId = "groupId"
@@ -33,10 +33,10 @@ class MemberMetadataTest {
 
 
   @Test
-  def testMatchesSupportedProtocols(): Unit = {
+  def testMatchesSupportedProtocols() {
     val protocols = List(("range", Array.empty[Byte]))
 
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
       protocolType, protocols)
     assertTrue(member.matches(protocols))
     assertFalse(member.matches(List(("range", Array[Byte](0)))))
@@ -45,48 +45,50 @@ class MemberMetadataTest {
   }
 
   @Test
-  def testVoteForPreferredProtocol(): Unit = {
+  def testVoteForPreferredProtocol() {
     val protocols = List(("range", Array.empty[Byte]), ("roundrobin", Array.empty[Byte]))
 
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
       protocolType, protocols)
     assertEquals("range", member.vote(Set("range", "roundrobin")))
     assertEquals("roundrobin", member.vote(Set("blah", "roundrobin")))
   }
 
   @Test
-  def testMetadata(): Unit = {
+  def testMetadata() {
     val protocols = List(("range", Array[Byte](0)), ("roundrobin", Array[Byte](1)))
 
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
       protocolType, protocols)
     assertTrue(Arrays.equals(Array[Byte](0), member.metadata("range")))
     assertTrue(Arrays.equals(Array[Byte](1), member.metadata("roundrobin")))
   }
 
-  @Test
-  def testMetadataRaisesOnUnsupportedProtocol(): Unit = {
+  @Test(expected = classOf[IllegalArgumentException])
+  def testMetadataRaisesOnUnsupportedProtocol() {
     val protocols = List(("range", Array.empty[Byte]), ("roundrobin", Array.empty[Byte]))
 
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
       protocolType, protocols)
-    assertThrows(classOf[IllegalArgumentException], () => member.metadata("blah"))
+    member.metadata("blah")
+    fail()
+  }
+
+  @Test(expected = classOf[IllegalArgumentException])
+  def testVoteRaisesOnNoSupportedProtocols() {
+    val protocols = List(("range", Array.empty[Byte]), ("roundrobin", Array.empty[Byte]))
+
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+      protocolType, protocols)
+    member.vote(Set("blah"))
+    fail()
   }
 
   @Test
-  def testVoteRaisesOnNoSupportedProtocols(): Unit = {
-    val protocols = List(("range", Array.empty[Byte]), ("roundrobin", Array.empty[Byte]))
-
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
-      protocolType, protocols)
-    assertThrows(classOf[IllegalArgumentException], () => member.vote(Set("blah")))
-  }
-
-  @Test
-  def testHasValidGroupInstanceId(): Unit = {
+  def testHasValidGroupInstanceId() {
     val protocols = List(("range", Array[Byte](0)), ("roundrobin", Array[Byte](1)))
 
-    val member = new MemberMetadata(memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
+    val member = new MemberMetadata(memberId, groupId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs,
       protocolType, protocols)
     assertTrue(member.isStaticMember)
     assertEquals(groupInstanceId, member.groupInstanceId)

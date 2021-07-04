@@ -16,38 +16,39 @@
  */
 package org.apache.kafka.test;
 
+
 import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.SourceNode;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class MockSourceNode<KIn, VIn> extends SourceNode<KIn, VIn> {
+public class MockSourceNode<K, V> extends SourceNode<K, V> {
 
-    private static final String NAME = "MOCK-SOURCE-";
-    private static final AtomicInteger INDEX = new AtomicInteger(1);
+    public static final String NAME = "MOCK-SOURCE-";
+    public static final AtomicInteger INDEX = new AtomicInteger(1);
 
     public int numReceived = 0;
-    public final ArrayList<KIn> keys = new ArrayList<>();
-    public final ArrayList<VIn> values = new ArrayList<>();
+    public final ArrayList<K> keys = new ArrayList<>();
+    public final ArrayList<V> values = new ArrayList<>();
     public boolean initialized;
     public boolean closed;
 
-    public MockSourceNode(final Deserializer<KIn> keyDeserializer, final Deserializer<VIn> valDeserializer) {
-        super(NAME + INDEX.getAndIncrement(), keyDeserializer, valDeserializer);
+    public MockSourceNode(final String[] topics, final Deserializer<K> keyDeserializer, final Deserializer<V> valDeserializer) {
+        super(NAME + INDEX.getAndIncrement(), Arrays.asList(topics), keyDeserializer, valDeserializer);
     }
 
     @Override
-    public void process(final Record<KIn, VIn> record) {
-        numReceived++;
-        keys.add(record.key());
-        values.add(record.value());
+    public void process(final K key, final V value) {
+        this.numReceived++;
+        this.keys.add(key);
+        this.values.add(value);
     }
 
     @Override
-    public void init(final InternalProcessorContext<KIn, VIn> context) {
+    public void init(final InternalProcessorContext context) {
         super.init(context);
         initialized = true;
     }
@@ -55,6 +56,6 @@ public class MockSourceNode<KIn, VIn> extends SourceNode<KIn, VIn> {
     @Override
     public void close() {
         super.close();
-        closed = true;
+        this.closed = true;
     }
 }

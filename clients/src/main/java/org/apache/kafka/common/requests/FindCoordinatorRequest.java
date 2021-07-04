@@ -17,15 +17,15 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.Node;
-import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.message.FindCoordinatorResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
+
 
 public class FindCoordinatorRequest extends AbstractRequest {
 
@@ -43,10 +43,6 @@ public class FindCoordinatorRequest extends AbstractRequest {
                 throw new UnsupportedVersionException("Cannot create a v" + version + " FindCoordinator request " +
                         "because we require features supported only in 2 or later.");
             }
-            if (version < 4 && !data.coordinatorKeys().isEmpty()) {
-                throw new NoBatchedFindCoordinatorsException("Cannot create a v" + version + " FindCoordinator request " +
-                        "because we require features supported only in 4 or later.");
-            }
             return new FindCoordinatorRequest(data, version);
         }
 
@@ -60,27 +56,16 @@ public class FindCoordinatorRequest extends AbstractRequest {
         }
     }
 
-    /**
-     * Indicates that it is not possible to lookup coordinators in batches with FindCoordinator. Instead
-     * coordinators must be looked up one by one.
-     */
-    public static class NoBatchedFindCoordinatorsException extends UnsupportedVersionException {
-        private static final long serialVersionUID = 1L;
-
-        public NoBatchedFindCoordinatorsException(String message, Throwable cause) {
-            super(message, cause);
-        }
-
-        public NoBatchedFindCoordinatorsException(String message) {
-            super(message);
-        }
-    }
-
     private final FindCoordinatorRequestData data;
 
     private FindCoordinatorRequest(FindCoordinatorRequestData data, short version) {
         super(ApiKeys.FIND_COORDINATOR, version);
         this.data = data;
+    }
+
+    public FindCoordinatorRequest(Struct struct, short version) {
+        super(ApiKeys.FIND_COORDINATOR, version);
+        this.data = new FindCoordinatorRequestData(struct, version);
     }
 
     @Override
@@ -90,19 +75,18 @@ public class FindCoordinatorRequest extends AbstractRequest {
             response.setThrottleTimeMs(throttleTimeMs);
         }
         Errors error = Errors.forException(e);
-        if (version() < 4) {
-            return FindCoordinatorResponse.prepareOldResponse(error, Node.noNode());
-        } else {
-            return FindCoordinatorResponse.prepareErrorResponse(error, data.coordinatorKeys());
-        }
+        return FindCoordinatorResponse.prepareResponse(error, Node.noNode());
     }
 
     public static FindCoordinatorRequest parse(ByteBuffer buffer, short version) {
-        return new FindCoordinatorRequest(new FindCoordinatorRequestData(new ByteBufferAccessor(buffer), version),
-            version);
+        return new FindCoordinatorRequest(ApiKeys.FIND_COORDINATOR.parseRequest(version, buffer), version);
     }
 
     @Override
+    protected Struct toStruct() {
+        return data.toStruct(version());
+    }
+
     public FindCoordinatorRequestData data() {
         return data;
     }
@@ -127,7 +111,7 @@ public class FindCoordinatorRequest extends AbstractRequest {
                 case 1:
                     return TRANSACTION;
                 default:
-                    throw new InvalidRequestException("Unknown coordinator type received: " + id);
+                    throw new IllegalArgumentException("Unknown coordinator type received: " + id);
             }
         }
     }

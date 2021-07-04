@@ -17,7 +17,7 @@
 package org.apache.kafka.connect.data;
 
 import org.apache.kafka.connect.errors.SchemaBuilderException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -26,9 +26,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 public class SchemaBuilderTest {
     private static final String NAME = "name";
@@ -48,9 +47,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testInt8BuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.int8().defaultValue("invalid"));
+        SchemaBuilder.int8().defaultValue("invalid");
     }
 
     @Test
@@ -65,9 +64,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testInt16BuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.int16().defaultValue("invalid"));
+        SchemaBuilder.int16().defaultValue("invalid");
     }
 
     @Test
@@ -82,9 +81,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testInt32BuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.int32().defaultValue("invalid"));
+        SchemaBuilder.int32().defaultValue("invalid");
     }
 
     @Test
@@ -99,9 +98,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testInt64BuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.int64().defaultValue("invalid"));
+        SchemaBuilder.int64().defaultValue("invalid");
     }
 
     @Test
@@ -116,9 +115,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testFloatBuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.float32().defaultValue("invalid"));
+        SchemaBuilder.float32().defaultValue("invalid");
     }
 
     @Test
@@ -133,9 +132,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testDoubleBuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.float64().defaultValue("invalid"));
+        SchemaBuilder.float64().defaultValue("invalid");
     }
 
     @Test
@@ -150,9 +149,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testBooleanBuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.bool().defaultValue("invalid"));
+        SchemaBuilder.bool().defaultValue("invalid");
     }
 
     @Test
@@ -167,9 +166,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testStringBuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.string().defaultValue(true));
+        SchemaBuilder.string().defaultValue(true);
     }
 
     @Test
@@ -184,9 +183,9 @@ public class SchemaBuilderTest {
         assertMetadata(schema, NAME, VERSION, DOC, NO_PARAMS);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testBytesBuilderInvalidDefault() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.bytes().defaultValue("a string, not bytes"));
+        SchemaBuilder.bytes().defaultValue("a string, not bytes");
     }
 
 
@@ -223,9 +222,9 @@ public class SchemaBuilderTest {
         assertNoMetadata(schema);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testNonStructCantHaveFields() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.int8().field("field", SchemaBuilder.int8().build()));
+        SchemaBuilder.int8().field("field", SchemaBuilder.int8().build());
     }
 
 
@@ -244,11 +243,10 @@ public class SchemaBuilderTest {
         assertNoMetadata(schema);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testArrayBuilderInvalidDefault() {
         // Array, but wrong embedded type
-        assertThrows(SchemaBuilderException.class,
-            () -> SchemaBuilder.array(Schema.INT8_SCHEMA).defaultValue(Collections.singletonList("string")).build());
+        SchemaBuilder.array(Schema.INT8_SCHEMA).defaultValue(Arrays.asList("string")).build();
     }
 
     @Test
@@ -276,12 +274,12 @@ public class SchemaBuilderTest {
         assertNoMetadata(schema);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testMapBuilderInvalidDefault() {
         // Map, but wrong embedded type
         Map<Byte, String> defMap = Collections.singletonMap((byte) 5, "foo");
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.map(Schema.INT8_SCHEMA, Schema.INT8_SCHEMA)
-                .defaultValue(defMap).build());
+        SchemaBuilder.map(Schema.INT8_SCHEMA, Schema.INT8_SCHEMA)
+                .defaultValue(defMap).build();
     }
 
     @Test
@@ -295,13 +293,16 @@ public class SchemaBuilderTest {
         new Struct(emptyStructSchema);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testDuplicateFields() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.struct()
-            .name("testing")
-            .field("id", SchemaBuilder.string().doc("").build())
-            .field("id", SchemaBuilder.string().doc("").build())
-            .build());
+        final Schema schema = SchemaBuilder.struct()
+                .name("testing")
+                .field("id", SchemaBuilder.string().doc("").build())
+                .field("id", SchemaBuilder.string().doc("").build())
+                .build();
+        final Struct struct = new Struct(schema)
+                .put("id", "testing");
+        struct.validate();
     }
 
     @Test
@@ -314,44 +315,49 @@ public class SchemaBuilderTest {
         assertEquals("testing", schemaBuilder.name());
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testDefaultFieldsDifferentValueOverwriting() {
         final SchemaBuilder schemaBuilder = SchemaBuilder.string().name("testing").version(123);
 
         schemaBuilder.name("testing");
-        assertThrows(SchemaBuilderException.class, () -> schemaBuilder.version(456));
+        schemaBuilder.version(456);
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testFieldNameNull() {
-        assertThrows(SchemaBuilderException.class,
-            () -> SchemaBuilder.struct().field(null, Schema.STRING_SCHEMA).build());
+        Schema schema = SchemaBuilder.struct()
+            .field(null, Schema.STRING_SCHEMA)
+            .build();
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testFieldSchemaNull() {
-        assertThrows(SchemaBuilderException.class,
-            () -> SchemaBuilder.struct().field("fieldName", null).build());
+        Schema schema = SchemaBuilder.struct()
+            .field("fieldName", null)
+            .build();
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testArraySchemaNull() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.array(null).build());
+        Schema schema = SchemaBuilder.array(null)
+            .build();
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testMapKeySchemaNull() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.map(null, Schema.STRING_SCHEMA).build());
+        Schema schema = SchemaBuilder.map(null, Schema.STRING_SCHEMA)
+            .build();
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testMapValueSchemaNull() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.map(Schema.STRING_SCHEMA, null).build());
+        Schema schema = SchemaBuilder.map(Schema.STRING_SCHEMA, null)
+            .build();
     }
 
-    @Test
+    @Test(expected = SchemaBuilderException.class)
     public void testTypeNotNull() {
-        assertThrows(SchemaBuilderException.class, () -> SchemaBuilder.type(null));
+        SchemaBuilder.type(null);
     }
 
     private void assertTypeAndDefault(Schema schema, Schema.Type type, boolean optional, Object defaultValue) {

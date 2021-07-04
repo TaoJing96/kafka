@@ -33,6 +33,7 @@ public class MetricConfig {
     private Sensor.RecordingLevel recordingLevel;
 
     public MetricConfig() {
+        super();
         this.quota = null;
         this.samples = 2;
         this.eventWindow = Long.MAX_VALUE;

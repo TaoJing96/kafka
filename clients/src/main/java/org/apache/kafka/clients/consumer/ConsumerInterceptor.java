@@ -65,7 +65,7 @@ public interface ConsumerInterceptor<K, V> extends Configurable, AutoCloseable {
      * @param records records to be consumed by the client or records returned by the previous interceptors in the list.
      * @return records that are either modified by the interceptor or same as records passed to this method.
      */
-    ConsumerRecords<K, V> onConsume(ConsumerRecords<K, V> records);
+    public ConsumerRecords<K, V> onConsume(ConsumerRecords<K, V> records);
 
     /**
      * This is called when offsets get committed.
@@ -74,10 +74,10 @@ public interface ConsumerInterceptor<K, V> extends Configurable, AutoCloseable {
      *
      * @param offsets A map of offsets by partition with associated metadata
      */
-    void onCommit(Map<TopicPartition, OffsetAndMetadata> offsets);
+    public void onCommit(Map<TopicPartition, OffsetAndMetadata> offsets);
 
     /**
      * This is called when interceptor is closed
      */
-    void close();
+    public void close();
 }

@@ -16,40 +16,35 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.InvalidRecordException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 public class EndTransactionMarkerTest {
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testUnknownControlTypeNotAllowed() {
-        assertThrows(IllegalArgumentException.class,
-            () -> new EndTransactionMarker(ControlRecordType.UNKNOWN, 24));
+        new EndTransactionMarker(ControlRecordType.UNKNOWN, 24);
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testCannotDeserializeUnknownControlType() {
-        assertThrows(IllegalArgumentException.class,
-            () -> EndTransactionMarker.deserializeValue(ControlRecordType.UNKNOWN, ByteBuffer.wrap(new byte[0])));
+        EndTransactionMarker.deserializeValue(ControlRecordType.UNKNOWN, ByteBuffer.wrap(new byte[0]));
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testIllegalNegativeVersion() {
         ByteBuffer buffer = ByteBuffer.allocate(2);
         buffer.putShort((short) -1);
         buffer.flip();
-        assertThrows(InvalidRecordException.class, () -> EndTransactionMarker.deserializeValue(ControlRecordType.ABORT, buffer));
+        EndTransactionMarker.deserializeValue(ControlRecordType.ABORT, buffer);
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testNotEnoughBytes() {
-        assertThrows(InvalidRecordException.class,
-            () -> EndTransactionMarker.deserializeValue(ControlRecordType.COMMIT, ByteBuffer.wrap(new byte[0])));
+        EndTransactionMarker.deserializeValue(ControlRecordType.COMMIT, ByteBuffer.wrap(new byte[0]));
     }
 
     @Test

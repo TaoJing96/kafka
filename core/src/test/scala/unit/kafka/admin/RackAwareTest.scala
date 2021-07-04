@@ -17,7 +17,7 @@
 package kafka.admin
 
 import scala.collection.{Map, Seq, mutable}
-import org.junit.jupiter.api.Assertions._
+import org.junit.Assert._
 
 trait RackAwareTest {
 
@@ -28,32 +28,29 @@ trait RackAwareTest {
                                replicationFactor: Int,
                                verifyRackAware: Boolean = true,
                                verifyLeaderDistribution: Boolean = true,
-                               verifyReplicasDistribution: Boolean = true): Unit = {
+                               verifyReplicasDistribution: Boolean = true) {
     // always verify that no broker will be assigned for more than one replica
     for ((_, brokerList) <- assignment) {
-      assertEquals(brokerList.toSet.size, brokerList.size,
-        "More than one replica is assigned to same broker for the same partition")
+      assertEquals("More than one replica is assigned to same broker for the same partition", brokerList.toSet.size, brokerList.size)
     }
     val distribution = getReplicaDistribution(assignment, brokerRackMapping)
 
     if (verifyRackAware) {
       val partitionRackMap = distribution.partitionRacks
-      assertEquals(List.fill(numPartitions)(replicationFactor), partitionRackMap.values.toList.map(_.distinct.size),
-        "More than one replica of the same partition is assigned to the same rack")
+      assertEquals("More than one replica of the same partition is assigned to the same rack",
+        List.fill(numPartitions)(replicationFactor), partitionRackMap.values.toList.map(_.distinct.size))
     }
 
     if (verifyLeaderDistribution) {
       val leaderCount = distribution.brokerLeaderCount
       val leaderCountPerBroker = numPartitions / numBrokers
-      assertEquals(List.fill(numBrokers)(leaderCountPerBroker), leaderCount.values.toList,
-        "Preferred leader count is not even for brokers")
+      assertEquals("Preferred leader count is not even for brokers", List.fill(numBrokers)(leaderCountPerBroker), leaderCount.values.toList)
     }
 
     if (verifyReplicasDistribution) {
       val replicasCount = distribution.brokerReplicasCount
       val numReplicasPerBroker = numPartitions * replicationFactor / numBrokers
-      assertEquals(List.fill(numBrokers)(numReplicasPerBroker), replicasCount.values.toList,
-        "Replica count is not even for broker")
+      assertEquals("Replica count is not even for broker", List.fill(numBrokers)(numReplicasPerBroker), replicasCount.values.toList)
     }
   }
 

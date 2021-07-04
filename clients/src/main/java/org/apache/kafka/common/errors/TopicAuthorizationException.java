@@ -22,25 +22,15 @@ import java.util.Set;
 public class TopicAuthorizationException extends AuthorizationException {
     private final Set<String> unauthorizedTopics;
 
-    public TopicAuthorizationException(String message, Set<String> unauthorizedTopics) {
-        super(message);
+    public TopicAuthorizationException(Set<String> unauthorizedTopics) {
+        super("Not authorized to access topics: " + unauthorizedTopics);
         this.unauthorizedTopics = unauthorizedTopics;
     }
 
-    public TopicAuthorizationException(Set<String> unauthorizedTopics) {
-        this("Not authorized to access topics: " + unauthorizedTopics, unauthorizedTopics);
+    public TopicAuthorizationException(String unauthorizedTopic) {
+        this(Collections.singleton(unauthorizedTopic));
     }
 
-    public TopicAuthorizationException(String message) {
-        this(message, Collections.emptySet());
-    }
-
-    /**
-     * Get the set of topics which failed authorization. May be empty if the set is not known
-     * in the context the exception was raised in.
-     *
-     * @return possibly empty set of unauthorized topics
-     */
     public Set<String> unauthorizedTopics() {
         return unauthorizedTopics;
     }

@@ -16,15 +16,13 @@
  */
 package kafka.common
 
+import kafka.security.auth.{Group, Resource}
 import kafka.utils.TestUtils
 import kafka.zk.{LiteralAclChangeStore, LiteralAclStore, ZkAclChangeStore, ZooKeeperTestHarness}
 import org.apache.kafka.common.resource.PatternType.LITERAL
-import org.apache.kafka.common.resource.ResourcePattern
-import org.apache.kafka.common.resource.ResourceType.GROUP
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.junit.{After, Before, Test}
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.Seq
 
 class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
 
@@ -32,14 +30,14 @@ class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
   private var notificationListener: ZkNodeChangeNotificationListener = _
   private var notificationHandler: TestNotificationHandler = _
 
-  @BeforeEach
+  @Before
   override def setUp(): Unit = {
     super.setUp()
     zkClient.createAclPaths()
     notificationHandler = new TestNotificationHandler()
   }
 
-  @AfterEach
+  @After
   override def tearDown(): Unit = {
     if (notificationListener != null) {
       notificationListener.close()
@@ -48,9 +46,9 @@ class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testProcessNotification(): Unit = {
-    val notificationMessage1 = new ResourcePattern(GROUP, "messageA", LITERAL)
-    val notificationMessage2 = new ResourcePattern(GROUP, "messageB", LITERAL)
+  def testProcessNotification() {
+    val notificationMessage1 = Resource(Group, "messageA", LITERAL)
+    val notificationMessage2 = Resource(Group, "messageB", LITERAL)
 
     notificationListener = new ZkNodeChangeNotificationListener(zkClient, LiteralAclChangeStore.aclChangePath,
       ZkAclChangeStore.SequenceNumberPrefix, notificationHandler, changeExpirationMs)
@@ -64,7 +62,7 @@ class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
      * There is no easy way to test purging. Even if we mock kafka time with MockTime, the purging compares kafka time
      * with the time stored in ZooKeeper stat and the embedded ZooKeeper server does not provide a way to mock time.
      * So to test purging we would have to use Time.SYSTEM.sleep(changeExpirationMs + 1) issue a write and check
-     * Assert.assertEquals(1, KafkaZkClient.getChildren(seqNodeRoot).size). However even that the assertion
+     * Assert.assertEquals(1, ZkUtils.getChildren(zkClient, seqNodeRoot).size). However even that the assertion
      * can fail as the second node can be deleted depending on how threads get scheduled.
      */
 
@@ -72,29 +70,29 @@ class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
     TestUtils.waitUntilTrue(() => notificationHandler.received().size == 2 && notificationHandler.received().last == notificationMessage2,
       "Failed to send/process notification message in the timeout period.")
 
-    (3 to 10).foreach(i => zkClient.createAclChangeNotification(new ResourcePattern(GROUP, "message" + i, LITERAL)))
+    (3 to 10).foreach(i => zkClient.createAclChangeNotification(Resource(Group, "message" + i, LITERAL)))
 
     TestUtils.waitUntilTrue(() => notificationHandler.received().size == 10,
       s"Expected 10 invocations of processNotifications, but there were ${notificationHandler.received()}")
   }
 
   @Test
-  def testSwallowsProcessorException(): Unit = {
+  def testSwallowsProcessorException() : Unit = {
     notificationHandler.setThrowSize(2)
     notificationListener = new ZkNodeChangeNotificationListener(zkClient, LiteralAclChangeStore.aclChangePath,
       ZkAclChangeStore.SequenceNumberPrefix, notificationHandler, changeExpirationMs)
     notificationListener.init()
 
-    zkClient.createAclChangeNotification(new ResourcePattern(GROUP, "messageA", LITERAL))
-    zkClient.createAclChangeNotification(new ResourcePattern(GROUP, "messageB", LITERAL))
-    zkClient.createAclChangeNotification(new ResourcePattern(GROUP, "messageC", LITERAL))
+    zkClient.createAclChangeNotification(Resource(Group, "messageA", LITERAL))
+    zkClient.createAclChangeNotification(Resource(Group, "messageB", LITERAL))
+    zkClient.createAclChangeNotification(Resource(Group, "messageC", LITERAL))
 
     TestUtils.waitUntilTrue(() => notificationHandler.received().size == 3,
       s"Expected 2 invocations of processNotifications, but there were ${notificationHandler.received()}")
   }
 
   private class TestNotificationHandler extends NotificationHandler {
-    private val messages = ArrayBuffer.empty[ResourcePattern]
+    private val messages = ArrayBuffer.empty[Resource]
     @volatile private var throwSize = Option.empty[Int]
 
     override def processNotification(notificationMessage: Array[Byte]): Unit = {
@@ -104,7 +102,7 @@ class ZkNodeChangeNotificationListenerTest extends ZooKeeperTestHarness {
         throw new RuntimeException("Oh no, my processing failed!")
     }
 
-    def received(): Seq[ResourcePattern] = messages
+    def received(): Seq[Resource] = messages
 
     def setThrowSize(index: Int): Unit = throwSize = Option(index)
   }

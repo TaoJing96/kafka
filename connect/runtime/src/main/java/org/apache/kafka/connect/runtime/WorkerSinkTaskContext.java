@@ -20,7 +20,6 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.IllegalWorkerStateException;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
-import org.apache.kafka.connect.sink.ErrantRecordReporter;
 import org.apache.kafka.connect.sink.SinkTaskContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -157,11 +156,6 @@ public class WorkerSinkTaskContext implements SinkTaskContext {
 
     public void clearCommitRequest() {
         commitRequested = false;
-    }
-
-    @Override
-    public ErrantRecordReporter errantRecordReporter() {
-        return sinkTask.workerErrantRecordReporter();
     }
 
     @Override

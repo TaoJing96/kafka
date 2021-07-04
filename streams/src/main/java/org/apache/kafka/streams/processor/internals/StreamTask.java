@@ -16,326 +16,276 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.Consumer;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.metrics.stats.Avg;
+import org.apache.kafka.common.metrics.stats.Count;
+import org.apache.kafka.common.metrics.stats.Max;
+import org.apache.kafka.common.metrics.stats.Rate;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
-import org.apache.kafka.streams.errors.LockException;
+import org.apache.kafka.streams.errors.ProcessorStateException;
+import org.apache.kafka.streams.errors.ProductionExceptionHandler;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.errors.TaskCorruptedException;
 import org.apache.kafka.streams.errors.TaskMigratedException;
-import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.processor.Cancellable;
 import org.apache.kafka.streams.processor.PunctuationType;
 import org.apache.kafka.streams.processor.Punctuator;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.TimestampExtractor;
-import org.apache.kafka.streams.processor.api.Record;
-import org.apache.kafka.streams.processor.internals.metrics.ProcessorNodeMetrics;
+import org.apache.kafka.streams.processor.internals.metrics.CumulativeCount;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.processor.internals.metrics.TaskMetrics;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.internals.ThreadCache;
 
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.nio.ByteBuffer;
-import java.util.Base64;
-import java.util.Collections;
+import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
+import static java.lang.String.format;
 import static java.util.Collections.singleton;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.maybeMeasureLatency;
+import static org.apache.kafka.streams.kstream.internals.metrics.Sensors.recordLatenessSensor;
 
 /**
  * A StreamTask is associated with a {@link PartitionGroup}, and is assigned to a StreamThread for processing.
  */
-public class StreamTask extends AbstractTask implements ProcessorNodePunctuator, Task {
+public class StreamTask extends AbstractTask implements ProcessorNodePunctuator {
 
-    // visible for testing
-    static final byte LATEST_MAGIC_BYTE = 1;
+    private static final ConsumerRecord<Object, Object> DUMMY_RECORD = new ConsumerRecord<>(ProcessorContextImpl.NONEXIST_TOPIC, -1, -1L, null, null);
 
     private final Time time;
-    private final Consumer<byte[], byte[]> mainConsumer;
-
-    // we want to abstract eos logic out of StreamTask, however
-    // there's still an optimization that requires this info to be
-    // leaked into this class, which is to checkpoint after committing if EOS is not enabled.
-    private final boolean eosEnabled;
-
+    private final long maxTaskIdleMs;
     private final int maxBufferedSize;
+    private final TaskMetrics taskMetrics;
     private final PartitionGroup partitionGroup;
     private final RecordCollector recordCollector;
     private final PartitionGroup.RecordInfo recordInfo;
     private final Map<TopicPartition, Long> consumedOffsets;
-    private final Map<TopicPartition, Long> committedOffsets;
-    private final Map<TopicPartition, Long> highWatermark;
-    private final Set<TopicPartition> resetOffsetsForPartitions;
-    private Optional<Long> timeCurrentIdlingStarted;
     private final PunctuationQueue streamTimePunctuationQueue;
     private final PunctuationQueue systemTimePunctuationQueue;
-    private final StreamsMetricsImpl streamsMetrics;
+    private final ProducerSupplier producerSupplier;
 
-    private long processTimeMs = 0L;
-
-    private final Sensor closeTaskSensor;
-    private final Sensor processRatioSensor;
-    private final Sensor processLatencySensor;
-    private final Sensor punctuateLatencySensor;
-    private final Sensor bufferedRecordsSensor;
-    private final Map<String, Sensor> e2eLatencySensors = new HashMap<>();
-
-    @SuppressWarnings("rawtypes")
-    private final InternalProcessorContext processorContext;
-
-    private final RecordQueueCreator recordQueueCreator;
-
-    private StampedRecord record;
-    private boolean commitNeeded = false;
+    private Sensor closeSensor;
+    private long idleStartTime;
+    private Producer<byte[], byte[]> producer;
     private boolean commitRequested = false;
-    private boolean hasPendingTxCommit = false;
+    private boolean transactionInFlight = false;
 
-    @SuppressWarnings("rawtypes")
+    protected static final class TaskMetrics {
+        final StreamsMetricsImpl metrics;
+        final Sensor taskCommitTimeSensor;
+        final Sensor taskEnforcedProcessSensor;
+        private final String taskName;
+
+        TaskMetrics(final TaskId id, final StreamsMetricsImpl metrics) {
+            taskName = id.toString();
+            this.metrics = metrics;
+            final String group = "stream-task-metrics";
+
+            // first add the global operation metrics if not yet, with the global tags only
+            final Map<String, String> allTagMap = metrics.tagMap("task-id", "all");
+            final Sensor parent = metrics.threadLevelSensor("commit", Sensor.RecordingLevel.DEBUG);
+            parent.add(
+                new MetricName("commit-latency-avg", group, "The average latency of commit operation.", allTagMap),
+                new Avg()
+            );
+            parent.add(
+                new MetricName("commit-latency-max", group, "The max latency of commit operation.", allTagMap),
+                new Max()
+            );
+            parent.add(
+                new MetricName("commit-rate", group, "The average number of occurrence of commit operation per second.", allTagMap),
+                new Rate(TimeUnit.SECONDS, new Count())
+            );
+            parent.add(
+                new MetricName("commit-total", group, "The total number of occurrence of commit operations.", allTagMap),
+                new CumulativeCount()
+            );
+
+            // add the operation metrics with additional tags
+            final Map<String, String> tagMap = metrics.tagMap("task-id", taskName);
+            taskCommitTimeSensor = metrics.taskLevelSensor(taskName, "commit", Sensor.RecordingLevel.DEBUG, parent);
+            taskCommitTimeSensor.add(
+                new MetricName("commit-latency-avg", group, "The average latency of commit operation.", tagMap),
+                new Avg()
+            );
+            taskCommitTimeSensor.add(
+                new MetricName("commit-latency-max", group, "The max latency of commit operation.", tagMap),
+                new Max()
+            );
+            taskCommitTimeSensor.add(
+                new MetricName("commit-rate", group, "The average number of occurrence of commit operation per second.", tagMap),
+                new Rate(TimeUnit.SECONDS, new Count())
+            );
+            taskCommitTimeSensor.add(
+                new MetricName("commit-total", group, "The total number of occurrence of commit operations.", tagMap),
+                new CumulativeCount()
+            );
+
+            // add the metrics for enforced processing
+            taskEnforcedProcessSensor = metrics.taskLevelSensor(taskName, "enforced-processing", Sensor.RecordingLevel.DEBUG, parent);
+            taskEnforcedProcessSensor.add(
+                    new MetricName("enforced-processing-rate", group, "The average number of occurrence of enforced-processing operation per second.", tagMap),
+                    new Rate(TimeUnit.SECONDS, new Count())
+            );
+            taskEnforcedProcessSensor.add(
+                    new MetricName("enforced-processing-total", group, "The total number of occurrence of enforced-processing operations.", tagMap),
+                    new CumulativeCount()
+            );
+
+        }
+
+        void removeAllSensors() {
+            metrics.removeAllTaskLevelSensors(taskName);
+        }
+    }
+
+    public interface ProducerSupplier {
+        Producer<byte[], byte[]> get();
+    }
+
     public StreamTask(final TaskId id,
-                      final Set<TopicPartition> inputPartitions,
+                      final Collection<TopicPartition> partitions,
                       final ProcessorTopology topology,
-                      final Consumer<byte[], byte[]> mainConsumer,
+                      final Consumer<byte[], byte[]> consumer,
+                      final ChangelogReader changelogReader,
                       final StreamsConfig config,
-                      final StreamsMetricsImpl streamsMetrics,
+                      final StreamsMetricsImpl metrics,
                       final StateDirectory stateDirectory,
                       final ThreadCache cache,
                       final Time time,
-                      final ProcessorStateManager stateMgr,
-                      final RecordCollector recordCollector,
-                      final InternalProcessorContext processorContext,
-                      final LogContext logContext) {
-        super(
-            id,
-            topology,
-            stateDirectory,
-            stateMgr,
-            inputPartitions,
-            config.getLong(StreamsConfig.TASK_TIMEOUT_MS_CONFIG),
-            "task",
-            StreamTask.class
-        );
-        this.mainConsumer = mainConsumer;
+                      final ProducerSupplier producerSupplier,
+                      final Sensor closeSensor) {
+        this(id, partitions, topology, consumer, changelogReader, config, metrics, stateDirectory, cache, time, producerSupplier, null, closeSensor);
+    }
 
-        this.processorContext = processorContext;
-        processorContext.transitionToActive(this, recordCollector, cache);
+    public StreamTask(final TaskId id,
+                      final Collection<TopicPartition> partitions,
+                      final ProcessorTopology topology,
+                      final Consumer<byte[], byte[]> consumer,
+                      final ChangelogReader changelogReader,
+                      final StreamsConfig config,
+                      final StreamsMetricsImpl metrics,
+                      final StateDirectory stateDirectory,
+                      final ThreadCache cache,
+                      final Time time,
+                      final ProducerSupplier producerSupplier,
+                      final RecordCollector recordCollector,
+                      final Sensor closeSensor) {
+        super(id, partitions, topology, consumer, changelogReader, false, stateDirectory, config);
 
         this.time = time;
-        this.recordCollector = recordCollector;
-        eosEnabled = StreamThread.eosEnabled(config);
+        this.producerSupplier = producerSupplier;
+        this.producer = producerSupplier.get();
+        this.closeSensor = closeSensor;
+        this.taskMetrics = new TaskMetrics(id, metrics);
 
-        final String threadId = Thread.currentThread().getName();
-        this.streamsMetrics = streamsMetrics;
-        closeTaskSensor = ThreadMetrics.closeTaskSensor(threadId, streamsMetrics);
-        final String taskId = id.toString();
-        processRatioSensor = TaskMetrics.activeProcessRatioSensor(threadId, taskId, streamsMetrics);
-        processLatencySensor = TaskMetrics.processLatencySensor(threadId, taskId, streamsMetrics);
-        punctuateLatencySensor = TaskMetrics.punctuateSensor(threadId, taskId, streamsMetrics);
-        bufferedRecordsSensor = TaskMetrics.activeBufferedRecordsSensor(threadId, taskId, streamsMetrics);
+        final ProductionExceptionHandler productionExceptionHandler = config.defaultProductionExceptionHandler();
 
-        for (final String terminalNodeName : topology.terminalNodes()) {
-            e2eLatencySensors.put(
-                terminalNodeName,
-                ProcessorNodeMetrics.e2ELatencySensor(threadId, taskId, terminalNodeName, streamsMetrics)
+        if (recordCollector == null) {
+            this.recordCollector = new RecordCollectorImpl(
+                id.toString(),
+                logContext,
+                productionExceptionHandler,
+                metrics.skippedRecordsSensor()
             );
+        } else {
+            this.recordCollector = recordCollector;
         }
-
-        for (final ProcessorNode<?, ?, ?, ?> sourceNode : topology.sources()) {
-            final String sourceNodeName = sourceNode.name();
-            e2eLatencySensors.put(
-                sourceNodeName,
-                ProcessorNodeMetrics.e2ELatencySensor(threadId, taskId, sourceNodeName, streamsMetrics)
-            );
-        }
+        this.recordCollector.init(this.producer);
 
         streamTimePunctuationQueue = new PunctuationQueue();
         systemTimePunctuationQueue = new PunctuationQueue();
+        maxTaskIdleMs = config.getLong(StreamsConfig.MAX_TASK_IDLE_MS_CONFIG);
         maxBufferedSize = config.getInt(StreamsConfig.BUFFERED_RECORDS_PER_PARTITION_CONFIG);
 
         // initialize the consumed and committed offset cache
         consumedOffsets = new HashMap<>();
-        resetOffsetsForPartitions = new HashSet<>();
 
-        recordQueueCreator = new RecordQueueCreator(this.logContext, config.defaultTimestampExtractor(), config.defaultDeserializationExceptionHandler());
+        // create queues for each assigned partition and associate them
+        // to corresponding source nodes in the processor topology
+        final Map<TopicPartition, RecordQueue> partitionQueues = new HashMap<>();
+
+        // initialize the topology with its own context
+        final ProcessorContextImpl processorContextImpl = new ProcessorContextImpl(id, this, config, this.recordCollector, stateMgr, metrics, cache);
+        processorContext = processorContextImpl;
+
+        final TimestampExtractor defaultTimestampExtractor = config.defaultTimestampExtractor();
+        final DeserializationExceptionHandler defaultDeserializationExceptionHandler = config.defaultDeserializationExceptionHandler();
+        for (final TopicPartition partition : partitions) {
+            final SourceNode source = topology.source(partition.topic());
+            final TimestampExtractor sourceTimestampExtractor = source.getTimestampExtractor() != null ? source.getTimestampExtractor() : defaultTimestampExtractor;
+            final RecordQueue queue = new RecordQueue(
+                partition,
+                source,
+                sourceTimestampExtractor,
+                defaultDeserializationExceptionHandler,
+                processorContext,
+                logContext
+            );
+            partitionQueues.put(partition, queue);
+        }
 
         recordInfo = new PartitionGroup.RecordInfo();
-
-        final Sensor enforcedProcessingSensor;
-        enforcedProcessingSensor = TaskMetrics.enforcedProcessingSensor(threadId, taskId, streamsMetrics);
-        final long maxTaskIdleMs = config.getLong(StreamsConfig.MAX_TASK_IDLE_MS_CONFIG);
-        partitionGroup = new PartitionGroup(
-            logContext,
-            createPartitionQueues(),
-            mainConsumer::currentLag,
-            TaskMetrics.recordLatenessSensor(threadId, taskId, streamsMetrics),
-            enforcedProcessingSensor,
-            maxTaskIdleMs
-        );
+        partitionGroup = new PartitionGroup(partitionQueues, recordLatenessSensor(processorContextImpl));
 
         stateMgr.registerGlobalStateStores(topology.globalStateStores());
-        committedOffsets = new HashMap<>();
-        highWatermark = new HashMap<>();
-        for (final TopicPartition topicPartition: inputPartitions) {
-            committedOffsets.put(topicPartition, -1L);
-            highWatermark.put(topicPartition, -1L);
-        }
-        timeCurrentIdlingStarted = Optional.empty();
-    }
 
-    // create queues for each assigned partition and associate them
-    // to corresponding source nodes in the processor topology
-    private Map<TopicPartition, RecordQueue> createPartitionQueues() {
-        final Map<TopicPartition, RecordQueue> partitionQueues = new HashMap<>();
-        for (final TopicPartition partition : inputPartitions()) {
-            partitionQueues.put(partition, recordQueueCreator.createQueue(partition));
+        // initialize transactions if eos is turned on, which will block if the previous transaction has not
+        // completed yet; do not start the first transaction until the topology has been initialized later
+        if (eosEnabled) {
+            initializeTransactions();
         }
-        return partitionQueues;
     }
 
     @Override
-    public boolean isActive() {
-        return true;
+    public boolean initializeStateStores() {
+        log.trace("Initializing state stores");
+        registerStateStores();
+
+        return changelogPartitions().isEmpty();
     }
 
     /**
-     * @throws LockException    could happen when multi-threads within the single instance, could retry
-     * @throws TimeoutException if initializing record collector timed out
-     * @throws StreamsException fatal error, should close the thread
+     * <pre>
+     * - (re-)initialize the topology of the task
+     * </pre>
+     *
+     * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
     @Override
-    public void initializeIfNeeded() {
-        if (state() == State.CREATED) {
-            recordCollector.initialize();
+    public void initializeTopology() {
+        initTopology();
 
-            StateManagerUtil.registerStateStores(log, logPrefix, topology, stateMgr, stateDirectory, processorContext);
-
-            // without EOS the checkpoint file would not be deleted after loading, and
-            // with EOS we would not checkpoint ever during running state anyways.
-            // therefore we can initialize the snapshot as empty so that we would checkpoint right after loading
-            offsetSnapshotSinceLastFlush = Collections.emptyMap();
-
-            transitionTo(State.RESTORING);
-
-            log.info("Initialized");
-        }
-    }
-
-    public void addPartitionsForOffsetReset(final Set<TopicPartition> partitionsForOffsetReset) {
-        mainConsumer.pause(partitionsForOffsetReset);
-        resetOffsetsForPartitions.addAll(partitionsForOffsetReset);
-    }
-
-    /**
-     * @throws TimeoutException if fetching committed offsets timed out
-     */
-    @Override
-    public void completeRestoration(final java.util.function.Consumer<Set<TopicPartition>> offsetResetter) {
-        switch (state()) {
-            case RUNNING:
-                return;
-
-            case RESTORING:
-                resetOffsetsIfNeededAndInitializeMetadata(offsetResetter);
-                initializeTopology();
-                processorContext.initialize();
-
-                transitionTo(State.RUNNING);
-
-                log.info("Restored and ready to run");
-
-                break;
-
-            case CREATED:
-            case SUSPENDED:
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while completing restoration for active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while completing restoration for active task " + id);
-        }
-    }
-
-    @Override
-    public void suspend() {
-        switch (state()) {
-            case CREATED:
-                transitToSuspend();
-                break;
-
-            case RESTORING:
-                transitToSuspend();
-                break;
-
-            case RUNNING:
-                try {
-                    // use try-catch to ensure state transition to SUSPENDED even if user code throws in `Processor#close()`
-                    closeTopology();
-
-                    // we must clear the buffered records when suspending because upon resuming the consumer would
-                    // re-fetch those records starting from the committed position
-                    partitionGroup.clear();
-                } finally {
-                    transitToSuspend();
-                    log.info("Suspended running");
-                }
-
-                break;
-
-            case SUSPENDED:
-                log.info("Skip suspending since state is {}", state());
-
-                break;
-
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while suspending active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while suspending active task " + id);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void closeTopology() {
-        log.trace("Closing processor topology");
-
-        // close the processors
-        // make sure close() is called for each node even when there is a RuntimeException
-        RuntimeException exception = null;
-        for (final ProcessorNode<?, ?, ?, ?> node : topology.processors()) {
-            processorContext.setCurrentNode(node);
+        if (eosEnabled) {
             try {
-                node.close();
-            } catch (final RuntimeException e) {
-                exception = e;
-            } finally {
-                processorContext.setCurrentNode(null);
+                this.producer.beginTransaction();
+            } catch (final ProducerFencedException fatal) {
+                throw new TaskMigratedException(this, fatal);
             }
+            transactionInFlight = true;
         }
 
-        if (exception != null) {
-            throw exception;
-        }
+        processorContext.initialize();
+
+        taskInitialized = true;
+
+        idleStartTime = RecordQueue.UNKNOWN;
+
+        stateMgr.ensureStoresRegistered();
     }
 
     /**
@@ -345,341 +295,45 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
      */
     @Override
     public void resume() {
-        switch (state()) {
-            case CREATED:
-            case RUNNING:
-            case RESTORING:
-                // no need to do anything, just let them continue running / restoring / closing
-                log.trace("Skip resuming since state is {}", state());
-                break;
+        log.debug("Resuming");
+        if (eosEnabled) {
+            if (producer != null) {
+                throw new IllegalStateException("Task producer should be null.");
+            }
+            producer = producerSupplier.get();
+            initializeTransactions();
+            recordCollector.init(producer);
 
-            case SUSPENDED:
-                // just transit the state without any logical changes: suspended and restoring states
-                // are not actually any different for inner modules
-
-                // Deleting checkpoint file before transition to RESTORING state (KAFKA-10362)
-                try {
-                    stateMgr.deleteCheckPointFileIfEOSEnabled();
-                    log.debug("Deleted check point file upon resuming with EOS enabled");
-                } catch (final IOException ioe) {
-                    log.error("Encountered error while deleting the checkpoint file due to this exception", ioe);
-                }
-
-                transitionTo(State.RESTORING);
-                log.info("Resumed to restoring state");
-
-                break;
-
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while resuming active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while resuming active task " + id);
+            try {
+                stateMgr.clearCheckpoints();
+            } catch (final IOException e) {
+                throw new ProcessorStateException(format("%sError while deleting the checkpoint file", logPrefix), e);
+            }
         }
-        timeCurrentIdlingStarted = Optional.empty();
-    }
-
-    /**
-     * @throws StreamsException fatal error that should cause the thread to die
-     * @throws TaskMigratedException recoverable error that would cause the task to be removed
-     * @return offsets that should be committed for this task
-     */
-    @Override
-    public Map<TopicPartition, OffsetAndMetadata> prepareCommit() {
-        switch (state()) {
-            case CREATED:
-            case RESTORING:
-            case RUNNING:
-            case SUSPENDED:
-                // the commitNeeded flag just indicates whether we have reached RUNNING and processed any new data,
-                // so it only indicates whether the record collector should be flushed or not, whereas the state
-                // manager should always be flushed; either there is newly restored data or the flush will be a no-op
-                if (commitNeeded) {
-                    // we need to flush the store caches before flushing the record collector since it may cause some
-                    // cached records to be processed and hence generate more records to be sent out
-                    //
-                    // TODO: this should be removed after we decouple caching with emitting
-                    stateMgr.flushCache();
-                    recordCollector.flush();
-                    hasPendingTxCommit = eosEnabled;
-
-                    log.debug("Prepared {} task for committing", state());
-                    return committableOffsetsAndMetadata();
-                } else {
-                    log.debug("Skipped preparing {} task for commit since there is nothing to commit", state());
-                    return Collections.emptyMap();
-                }
-
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while preparing active task " + id + " for committing");
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while preparing active task " + id + " for committing");
-        }
-    }
-
-    private Map<TopicPartition, OffsetAndMetadata> committableOffsetsAndMetadata() {
-        final Map<TopicPartition, OffsetAndMetadata> committableOffsets;
-
-        switch (state()) {
-            case CREATED:
-            case RESTORING:
-                committableOffsets = Collections.emptyMap();
-
-                break;
-
-            case RUNNING:
-            case SUSPENDED:
-                final Map<TopicPartition, Long> partitionTimes = extractPartitionTimes();
-
-                committableOffsets = new HashMap<>(consumedOffsets.size());
-                for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
-                    final TopicPartition partition = entry.getKey();
-                    Long offset = partitionGroup.headRecordOffset(partition);
-                    if (offset == null) {
-                        try {
-                            offset = mainConsumer.position(partition);
-                        } catch (final TimeoutException error) {
-                            // the `consumer.position()` call should never block, because we know that we did process data
-                            // for the requested partition and thus the consumer should have a valid local position
-                            // that it can return immediately
-
-                            // hence, a `TimeoutException` indicates a bug and thus we rethrow it as fatal `IllegalStateException`
-                            throw new IllegalStateException(error);
-                        } catch (final KafkaException fatal) {
-                            throw new StreamsException(fatal);
-                        }
-                    }
-                    final long partitionTime = partitionTimes.get(partition);
-                    committableOffsets.put(partition, new OffsetAndMetadata(offset, encodeTimestamp(partitionTime)));
-                }
-
-                break;
-
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while getting committable offsets for active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while post committing active task " + id);
-        }
-
-        return committableOffsets;
-    }
-
-    @Override
-    public void postCommit(final boolean enforceCheckpoint) {
-        switch (state()) {
-            case CREATED:
-                // We should never write a checkpoint for a CREATED task as we may overwrite an existing checkpoint
-                // with empty uninitialized offsets
-                log.debug("Skipped writing checkpoint for {} task", state());
-
-                break;
-
-            case RESTORING:
-            case SUSPENDED:
-                maybeWriteCheckpoint(enforceCheckpoint);
-                log.debug("Finalized commit for {} task with enforce checkpoint {}", state(), enforceCheckpoint);
-
-                break;
-
-            case RUNNING:
-                if (enforceCheckpoint || !eosEnabled) {
-                    maybeWriteCheckpoint(enforceCheckpoint);
-                }
-                log.debug("Finalized commit for {} task with eos {} enforce checkpoint {}", state(), eosEnabled, enforceCheckpoint);
-
-                break;
-
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while post committing active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while post committing active task " + id);
-        }
-
-        clearCommitStatuses();
-    }
-
-    private void clearCommitStatuses() {
-        commitNeeded = false;
-        commitRequested = false;
-        hasPendingTxCommit = false;
-    }
-
-    private Map<TopicPartition, Long> extractPartitionTimes() {
-        final Map<TopicPartition, Long> partitionTimes = new HashMap<>();
-        for (final TopicPartition partition : partitionGroup.partitions()) {
-            partitionTimes.put(partition, partitionGroup.partitionTimestamp(partition));
-        }
-        return partitionTimes;
-    }
-
-    @Override
-    public void closeClean() {
-        validateClean();
-        removeAllSensors();
-        clearCommitStatuses();
-        close(true);
-        log.info("Closed clean");
-    }
-
-    @Override
-    public void closeDirty() {
-        removeAllSensors();
-        clearCommitStatuses();
-        close(false);
-        log.info("Closed dirty");
-    }
-
-    @Override
-    public void updateInputPartitions(final Set<TopicPartition> topicPartitions, final Map<String, List<String>> allTopologyNodesToSourceTopics) {
-        super.updateInputPartitions(topicPartitions, allTopologyNodesToSourceTopics);
-        partitionGroup.updatePartitions(topicPartitions, recordQueueCreator::createQueue);
-    }
-
-    @Override
-    public void closeCleanAndRecycleState() {
-        validateClean();
-        removeAllSensors();
-        clearCommitStatuses();
-        switch (state()) {
-            case SUSPENDED:
-                stateMgr.recycle();
-                recordCollector.closeClean();
-
-                break;
-
-            case CREATED:
-            case RESTORING:
-            case RUNNING:
-            case CLOSED:
-                throw new IllegalStateException("Illegal state " + state() + " while recycling active task " + id);
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while recycling active task " + id);
-        }
-
-        closeTaskSensor.record();
-
-        transitionTo(State.CLOSED);
-
-        log.info("Closed clean and recycled state");
-    }
-
-    /**
-     * The following exceptions maybe thrown from the state manager flushing call
-     *
-     * @throws TaskMigratedException recoverable error sending changelog records that would cause the task to be removed
-     * @throws StreamsException fatal error when flushing the state store, for example sending changelog records failed
-     *                          or flushing state store get IO errors; such error should cause the thread to die
-     */
-    @Override
-    protected void maybeWriteCheckpoint(final boolean enforceCheckpoint) {
-        // commitNeeded indicates we may have processed some records since last commit
-        // and hence we need to refresh checkpointable offsets regardless whether we should checkpoint or not
-        if (commitNeeded) {
-            stateMgr.updateChangelogOffsets(checkpointableOffsets());
-        }
-
-        super.maybeWriteCheckpoint(enforceCheckpoint);
-    }
-
-    private void validateClean() {
-        // It may be that we failed to commit a task during handleRevocation, but "forgot" this and tried to
-        // closeClean in handleAssignment. We should throw if we detect this to force the TaskManager to closeDirty
-        if (commitNeeded) {
-            log.debug("Tried to close clean but there was pending uncommitted data, this means we failed to"
-                          + " commit and should close as dirty instead");
-            throw new TaskMigratedException("Tried to close dirty task as clean");
-        }
-    }
-
-    private void removeAllSensors() {
-        streamsMetrics.removeAllTaskLevelSensors(Thread.currentThread().getName(), id.toString());
-        for (final String nodeName : e2eLatencySensors.keySet()) {
-            streamsMetrics.removeAllNodeLevelSensors(Thread.currentThread().getName(), id.toString(), nodeName);
-        }
-    }
-
-    /**
-     * You must commit a task and checkpoint the state manager before closing as this will release the state dir lock
-     */
-    private void close(final boolean clean) {
-        switch (state()) {
-            case SUSPENDED:
-                // first close state manager (which is idempotent) then close the record collector
-                // if the latter throws and we re-close dirty which would close the state manager again.
-                TaskManager.executeAndMaybeSwallow(
-                    clean,
-                    () -> StateManagerUtil.closeStateManager(
-                        log,
-                        logPrefix,
-                        clean,
-                        eosEnabled,
-                        stateMgr,
-                        stateDirectory,
-                        TaskType.ACTIVE
-                    ),
-                    "state manager close",
-                    log);
-
-                TaskManager.executeAndMaybeSwallow(
-                    clean,
-                    clean ? recordCollector::closeClean : recordCollector::closeDirty,
-                    "record collector close",
-                    log
-                );
-
-                break;
-
-            case CLOSED:
-                log.trace("Skip closing since state is {}", state());
-                return;
-
-            case CREATED:
-            case RESTORING:
-            case RUNNING:
-                throw new IllegalStateException("Illegal state " + state() + " while closing active task " + id);
-
-            default:
-                throw new IllegalStateException("Unknown state " + state() + " while closing active task " + id);
-        }
-
-        record = null;
-        partitionGroup.clear();
-        closeTaskSensor.record();
-
-        transitionTo(State.CLOSED);
     }
 
     /**
      * An active task is processable if its buffer contains data for all of its input
-     * source topic partitions, or if it is enforced to be processable.
+     * source topic partitions, or if it is enforced to be processable
      */
-    public boolean isProcessable(final long wallClockTime) {
-        if (state() == State.CLOSED) {
-            // a task is only closing / closed when 1) task manager is closing, 2) a rebalance is undergoing;
-            // in either case we can just log it and move on without notifying the thread since the consumer
-            // would soon be updated to not return any records for this task anymore.
-            log.info("Stream task {} is already in {} state, skip processing it.", id(), state());
+    boolean isProcessable(final long now) {
+        if (partitionGroup.allPartitionsBuffered()) {
+            idleStartTime = RecordQueue.UNKNOWN;
+            return true;
+        } else if (partitionGroup.numBuffered() > 0) {
+            if (idleStartTime == RecordQueue.UNKNOWN) {
+                idleStartTime = now;
+            }
 
-            return false;
-        }
-
-        if (hasPendingTxCommit) {
-            // if the task has a pending TX commit, we should just retry the commit but not process any records
-            // thus, the task is not processable, even if there is available data in the record queue
-            return false;
-        }
-        final boolean readyToProcess = partitionGroup.readyToProcess(wallClockTime);
-        if (!readyToProcess) {
-            if (!timeCurrentIdlingStarted.isPresent()) {
-                timeCurrentIdlingStarted = Optional.of(wallClockTime);
+            if (now - idleStartTime >= maxTaskIdleMs) {
+                taskMetrics.taskEnforcedProcessSensor.record();
+                return true;
+            } else {
+                return false;
             }
         } else {
-            timeCurrentIdlingStarted = Optional.empty();
+            return false;
         }
-        return readyToProcess;
     }
 
     /**
@@ -689,46 +343,24 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
      * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
     @SuppressWarnings("unchecked")
-    public boolean process(final long wallClockTime) {
+    public boolean process() {
+        // get the next record to process
+        final StampedRecord record = partitionGroup.nextRecord(recordInfo);
+
+        // if there is no record to process, return immediately
         if (record == null) {
-            if (!isProcessable(wallClockTime)) {
-                return false;
-            }
-
-            // get the next record to process
-            record = partitionGroup.nextRecord(recordInfo, wallClockTime);
-
-            // if there is no record to process, return immediately
-            if (record == null) {
-                return false;
-            }
+            return false;
         }
-
 
         try {
             // process the record by passing to the source node of the topology
-            final ProcessorNode<Object, Object, Object, Object> currNode = (ProcessorNode<Object, Object, Object, Object>) recordInfo.node();
+            final ProcessorNode currNode = recordInfo.node();
             final TopicPartition partition = recordInfo.partition();
 
             log.trace("Start processing one record [{}]", record);
 
-            final ProcessorRecordContext recordContext = new ProcessorRecordContext(
-                record.timestamp,
-                record.offset(),
-                record.partition(),
-                record.topic(),
-                record.headers()
-            );
-            updateProcessorContext(currNode, wallClockTime, recordContext);
-
-            maybeRecordE2ELatency(record.timestamp, wallClockTime, currNode.name());
-            final Record<Object, Object> toProcess = new Record<>(
-                record.key(),
-                record.value(),
-                processorContext.timestamp(),
-                processorContext.headers()
-            );
-            maybeMeasureLatency(() -> currNode.process(toProcess), time, processLatencySensor);
+            updateProcessorContext(record, currNode);
+            currNode.process(record.key(), record.value());
 
             log.trace("Completed processing one record [{}]", record);
 
@@ -739,36 +371,21 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
             // after processing this record, if its partition queue's buffered size has been
             // decreased to the threshold, we can then resume the consumption on this partition
             if (recordInfo.queue().size() == maxBufferedSize) {
-                mainConsumer.resume(singleton(partition));
+                consumer.resume(singleton(partition));
             }
-
-            record = null;
-        } catch (final TimeoutException timeoutException) {
-            if (!eosEnabled) {
-                throw timeoutException;
-            } else {
-                record = null;
-                throw new TaskCorruptedException(Collections.singleton(id));
-            }
-        } catch (final StreamsException exception) {
-            record = null;
-            throw exception;
-        } catch (final RuntimeException e) {
-            final StreamsException error = new StreamsException(
-                String.format(
-                    "Exception caught in process. taskId=%s, processor=%s, topic=%s, partition=%d, offset=%d, stacktrace=%s",
-                    id(),
-                    processorContext.currentNode().name(),
-                    record.topic(),
-                    record.partition(),
-                    record.offset(),
-                    getStacktraceString(e)
-                ),
-                e
-            );
-            record = null;
-
-            throw error;
+        } catch (final ProducerFencedException fatal) {
+            throw new TaskMigratedException(this, fatal);
+        } catch (final KafkaException e) {
+            final String stackTrace = getStacktraceString(e);
+            throw new StreamsException(format("Exception caught in process. taskId=%s, " +
+                    "processor=%s, topic=%s, partition=%d, offset=%d, stacktrace=%s",
+                id(),
+                processorContext.currentNode().name(),
+                record.topic(),
+                record.partition(),
+                record.offset(),
+                stackTrace
+            ), e);
         } finally {
             processorContext.setCurrentNode(null);
         }
@@ -776,19 +393,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         return true;
     }
 
-    @Override
-    public void recordProcessBatchTime(final long processBatchTime) {
-        processTimeMs += processBatchTime;
-    }
-
-    @Override
-    public void recordProcessTimeRatioAndBufferSize(final long allTaskProcessMs, final long now) {
-        bufferedRecordsSensor.record(partitionGroup.numBuffered());
-        processRatioSensor.record((double) processTimeMs / allTaskProcessMs, now);
-        processTimeMs = 0L;
-    }
-
-    private String getStacktraceString(final RuntimeException e) {
+    private String getStacktraceString(final KafkaException e) {
         String stacktrace = null;
         try (final StringWriter stringWriter = new StringWriter();
              final PrintWriter printWriter = new PrintWriter(stringWriter)) {
@@ -804,141 +409,137 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
      * @throws IllegalStateException if the current node is not null
      * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
-    @SuppressWarnings("unchecked")
     @Override
-    public void punctuate(final ProcessorNode<?, ?, ?, ?> node,
-                          final long timestamp,
-                          final PunctuationType type,
-                          final Punctuator punctuator) {
+    public void punctuate(final ProcessorNode node, final long timestamp, final PunctuationType type, final Punctuator punctuator) {
         if (processorContext.currentNode() != null) {
             throw new IllegalStateException(String.format("%sCurrent node is not null", logPrefix));
         }
 
-        // when punctuating, we need to preserve the timestamp (this can be either system time or event time)
-        // while other record context are set as dummy: null topic, -1 partition, -1 offset and empty header
-        final ProcessorRecordContext recordContext = new ProcessorRecordContext(
-            timestamp,
-            -1L,
-            -1,
-            null,
-            new RecordHeaders()
-        );
-        updateProcessorContext(node, time.milliseconds(), recordContext);
+        updateProcessorContext(new StampedRecord(DUMMY_RECORD, timestamp), node);
 
         if (log.isTraceEnabled()) {
             log.trace("Punctuating processor {} with timestamp {} and punctuation type {}", node.name(), timestamp, type);
         }
 
         try {
-            maybeMeasureLatency(() -> node.punctuate(timestamp, punctuator), time, punctuateLatencySensor);
-        } catch (final StreamsException e) {
-            throw e;
-        } catch (final RuntimeException e) {
+            node.punctuate(timestamp, punctuator);
+        } catch (final ProducerFencedException fatal) {
+            throw new TaskMigratedException(this, fatal);
+        } catch (final KafkaException e) {
             throw new StreamsException(String.format("%sException caught while punctuating processor '%s'", logPrefix, node.name()), e);
         } finally {
             processorContext.setCurrentNode(null);
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private void updateProcessorContext(final ProcessorNode<?, ?, ?, ?> currNode,
-                                        final long wallClockTime,
-                                        final ProcessorRecordContext recordContext) {
-        processorContext.setRecordContext(recordContext);
+    private void updateProcessorContext(final StampedRecord record, final ProcessorNode currNode) {
+        processorContext.setRecordContext(
+            new ProcessorRecordContext(
+                record.timestamp,
+                record.offset(),
+                record.partition(),
+                record.topic(),
+                record.headers()));
         processorContext.setCurrentNode(currNode);
-        processorContext.setSystemTimeMs(wallClockTime);
     }
 
     /**
-     * Return all the checkpointable offsets(written + consumed) to the state manager.
-     * Currently only changelog topic offsets need to be checkpointed.
+     * <pre>
+     * - flush state and producer
+     * - if(!eos) write checkpoint
+     * - commit offsets and start new transaction
+     * </pre>
+     *
+     * @throws TaskMigratedException if committing offsets failed (non-EOS)
+     *                               or if the task producer got fenced (EOS)
      */
-    private Map<TopicPartition, Long> checkpointableOffsets() {
-        final Map<TopicPartition, Long> checkpointableOffsets = new HashMap<>(recordCollector.offsets());
+    @Override
+    public void commit() {
+        commit(true);
+    }
+
+    /**
+     * @throws TaskMigratedException if committing offsets failed (non-EOS)
+     *                               or if the task producer got fenced (EOS)
+     */
+    // visible for testing
+    void commit(final boolean startNewTransaction) {
+        final long startNs = time.nanoseconds();
+        log.debug("Committing");
+
+        flushState();
+
+        if (!eosEnabled) {
+            stateMgr.checkpoint(activeTaskCheckpointableOffsets());
+        }
+
+        final Map<TopicPartition, OffsetAndMetadata> consumedOffsetsAndMetadata = new HashMap<>(consumedOffsets.size());
+        for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
+            final TopicPartition partition = entry.getKey();
+            final long offset = entry.getValue() + 1;
+            consumedOffsetsAndMetadata.put(partition, new OffsetAndMetadata(offset));
+            stateMgr.putOffsetLimit(partition, offset);
+        }
+
+        try {
+            if (eosEnabled) {
+                producer.sendOffsetsToTransaction(consumedOffsetsAndMetadata, applicationId);
+                producer.commitTransaction();
+                transactionInFlight = false;
+                if (startNewTransaction) {
+                    producer.beginTransaction();
+                    transactionInFlight = true;
+                }
+            } else {
+                consumer.commitSync(consumedOffsetsAndMetadata);
+            }
+        } catch (final CommitFailedException | ProducerFencedException error) {
+            throw new TaskMigratedException(this, error);
+        }
+
+        commitNeeded = false;
+        commitRequested = false;
+        taskMetrics.taskCommitTimeSensor.record(time.nanoseconds() - startNs);
+    }
+
+    @Override
+    protected Map<TopicPartition, Long> activeTaskCheckpointableOffsets() {
+        final Map<TopicPartition, Long> checkpointableOffsets =
+            new HashMap<>(recordCollector.offsets());
         for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
             checkpointableOffsets.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        log.debug("Checkpointable offsets {}", checkpointableOffsets);
-
         return checkpointableOffsets;
     }
 
-    private void resetOffsetsIfNeededAndInitializeMetadata(final java.util.function.Consumer<Set<TopicPartition>> offsetResetter) {
-        try {
-            final Map<TopicPartition, OffsetAndMetadata> offsetsAndMetadata = mainConsumer.committed(inputPartitions());
-
-            for (final Map.Entry<TopicPartition, OffsetAndMetadata> committedEntry : offsetsAndMetadata.entrySet()) {
-                if (resetOffsetsForPartitions.contains(committedEntry.getKey())) {
-                    final OffsetAndMetadata offsetAndMetadata = committedEntry.getValue();
-                    if (offsetAndMetadata != null) {
-                        mainConsumer.seek(committedEntry.getKey(), offsetAndMetadata);
-                        resetOffsetsForPartitions.remove(committedEntry.getKey());
-                    }
-                }
-            }
-
-            offsetResetter.accept(resetOffsetsForPartitions);
-            resetOffsetsForPartitions.clear();
-
-            initializeTaskTime(offsetsAndMetadata.entrySet().stream()
-                .filter(e -> e.getValue() != null)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
-            );
-        } catch (final TimeoutException timeoutException) {
-            log.warn(
-                "Encountered {} while trying to fetch committed offsets, will retry initializing the metadata in the next loop." +
-                    "\nConsider overwriting consumer config {} to a larger value to avoid timeout errors",
-                time.toString(),
-                ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG);
-
-            // re-throw to trigger `task.timeout.ms`
-            throw timeoutException;
-        } catch (final KafkaException e) {
-            throw new StreamsException(String.format("task [%s] Failed to initialize offsets for %s", id, inputPartitions()), e);
-        }
-    }
-
-    private void initializeTaskTime(final Map<TopicPartition, OffsetAndMetadata> offsetsAndMetadata) {
-        for (final Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsetsAndMetadata.entrySet()) {
-            final TopicPartition partition = entry.getKey();
-            final OffsetAndMetadata metadata = entry.getValue();
-
-            if (metadata != null) {
-                final long committedTimestamp = decodeTimestamp(metadata.metadata());
-                partitionGroup.setPartitionTime(partition, committedTimestamp);
-                log.debug("A committed timestamp was detected: setting the partition time of partition {}"
-                    + " to {} in stream task {}", partition, committedTimestamp, id);
-            } else {
-                log.debug("No committed timestamp was found in metadata for partition {}", partition);
-            }
-        }
-
-        final Set<TopicPartition> nonCommitted = new HashSet<>(inputPartitions());
-        nonCommitted.removeAll(offsetsAndMetadata.keySet());
-        for (final TopicPartition partition : nonCommitted) {
-            log.debug("No committed offset for partition {}, therefore no timestamp can be found for this partition", partition);
-        }
-    }
-
     @Override
-    public Map<TopicPartition, Long> purgeableOffsets() {
-        final Map<TopicPartition, Long> purgeableConsumedOffsets = new HashMap<>();
+    protected void flushState() {
+        log.trace("Flushing state and producer");
+        super.flushState();
+        try {
+            recordCollector.flush();
+        } catch (final ProducerFencedException fatal) {
+            throw new TaskMigratedException(this, fatal);
+        }
+    }
+
+    Map<TopicPartition, Long> purgableOffsets() {
+        final Map<TopicPartition, Long> purgableConsumedOffsets = new HashMap<>();
         for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
             final TopicPartition tp = entry.getKey();
             if (topology.isRepartitionTopic(tp.topic())) {
-                purgeableConsumedOffsets.put(tp, entry.getValue() + 1);
+                purgableConsumedOffsets.put(tp, entry.getValue() + 1);
             }
         }
 
-        return purgeableConsumedOffsets;
+        return purgableConsumedOffsets;
     }
 
-    @SuppressWarnings("unchecked")
-    private void initializeTopology() {
+    private void initTopology() {
         // initialize the task by initializing all its processor nodes in the topology
         log.trace("Initializing processor nodes of the topology");
-        for (final ProcessorNode<?, ?, ?, ?> node : topology.processors()) {
+        for (final ProcessorNode node : topology.processors()) {
             processorContext.setCurrentNode(node);
             try {
                 node.init(processorContext);
@@ -949,13 +550,196 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
     }
 
     /**
+     * <pre>
+     * - close topology
+     * - {@link #commit()}
+     *   - flush state and producer
+     *   - if (!eos) write checkpoint
+     *   - commit offsets
+     * </pre>
+     *
+     * @throws TaskMigratedException if committing offsets failed (non-EOS)
+     *                               or if the task producer got fenced (EOS)
+     */
+    @Override
+    public void suspend() {
+        log.debug("Suspending");
+        suspend(true, false);
+    }
+
+    /**
+     * <pre>
+     * - close topology
+     * - if (clean) {@link #commit()}
+     *   - flush state and producer
+     *   - if (!eos) write checkpoint
+     *   - commit offsets
+     * </pre>
+     *
+     * @throws TaskMigratedException if committing offsets failed (non-EOS)
+     *                               or if the task producer got fenced (EOS)
+     */
+    // visible for testing
+    void suspend(final boolean clean,
+                 final boolean isZombie) {
+        try {
+            closeTopology(); // should we call this only on clean suspend?
+        } catch (final RuntimeException fatal) {
+            if (clean) {
+                throw fatal;
+            }
+        }
+
+        if (clean) {
+            TaskMigratedException taskMigratedException = null;
+            try {
+                commit(false);
+            } finally {
+                if (eosEnabled) {
+
+                    stateMgr.checkpoint(activeTaskCheckpointableOffsets());
+
+                    try {
+                        recordCollector.close();
+                    } catch (final ProducerFencedException e) {
+                        taskMigratedException = new TaskMigratedException(this, e);
+                    } finally {
+                        producer = null;
+                    }
+                }
+            }
+            if (taskMigratedException != null) {
+                throw taskMigratedException;
+            }
+        } else {
+            maybeAbortTransactionAndCloseRecordCollector(isZombie);
+        }
+    }
+
+    private void maybeAbortTransactionAndCloseRecordCollector(final boolean isZombie) {
+        if (eosEnabled && !isZombie) {
+            try {
+                if (transactionInFlight) {
+                    producer.abortTransaction();
+                }
+                transactionInFlight = false;
+            } catch (final ProducerFencedException ignore) {
+                /* TODO
+                 * this should actually never happen atm as we guard the call to #abortTransaction
+                 * -> the reason for the guard is a "bug" in the Producer -- it throws IllegalStateException
+                 * instead of ProducerFencedException atm. We can remove the isZombie flag after KAFKA-5604 got
+                 * fixed and fall-back to this catch-and-swallow code
+                 */
+
+                // can be ignored: transaction got already aborted by brokers/transactional-coordinator if this happens
+            }
+        }
+
+        if (eosEnabled) {
+            try {
+                recordCollector.close();
+            } catch (final Throwable e) {
+                log.error("Failed to close producer due to the following error:", e);
+            } finally {
+                producer = null;
+            }
+        }
+    }
+
+    private void closeTopology() {
+        log.trace("Closing processor topology");
+
+        partitionGroup.clear();
+
+        // close the processors
+        // make sure close() is called for each node even when there is a RuntimeException
+        RuntimeException exception = null;
+        if (taskInitialized) {
+            for (final ProcessorNode node : topology.processors()) {
+                processorContext.setCurrentNode(node);
+                try {
+                    node.close();
+                } catch (final RuntimeException e) {
+                    exception = e;
+                } finally {
+                    processorContext.setCurrentNode(null);
+                }
+            }
+        }
+
+        if (exception != null) {
+            throw exception;
+        }
+    }
+
+    // helper to avoid calling suspend() twice if a suspended task is not reassigned and closed
+    @Override
+    public void closeSuspended(final boolean clean,
+                               final boolean isZombie,
+                               RuntimeException firstException) {
+        try {
+            closeStateManager(clean);
+        } catch (final RuntimeException e) {
+            if (firstException == null) {
+                firstException = e;
+            }
+            log.error("Could not close state manager due to the following error:", e);
+        }
+
+        partitionGroup.close();
+        taskMetrics.removeAllSensors();
+
+        closeSensor.record();
+
+        if (firstException != null) {
+            throw firstException;
+        }
+    }
+
+    /**
+     * <pre>
+     * - {@link #suspend(boolean, boolean) suspend(clean)}
+     *   - close topology
+     *   - if (clean) {@link #commit()}
+     *     - flush state and producer
+     *     - commit offsets
+     * - close state
+     *   - if (clean) write checkpoint
+     * - if (eos) close producer
+     * </pre>
+     *
+     * @param clean    shut down cleanly (ie, incl. flush and commit) if {@code true} --
+     *                 otherwise, just close open resources
+     * @param isZombie {@code true} is this task is a zombie or not (this will repress {@link TaskMigratedException}
+     * @throws TaskMigratedException if committing offsets failed (non-EOS)
+     *                               or if the task producer got fenced (EOS)
+     */
+    @Override
+    public void close(boolean clean,
+                      final boolean isZombie) {
+        log.debug("Closing");
+
+        RuntimeException firstException = null;
+        try {
+            suspend(clean, isZombie);
+        } catch (final RuntimeException e) {
+            clean = false;
+            firstException = e;
+            log.error("Could not close task due to the following error:", e);
+        }
+
+        closeSuspended(clean, isZombie, firstException);
+
+        taskClosed = true;
+    }
+
+    /**
      * Adds records to queues. If a record has an invalid (i.e., negative) timestamp, the record is skipped
      * and not added to the queue for processing
      *
      * @param partition the partition
      * @param records   the records
      */
-    @Override
     public void addRecords(final TopicPartition partition, final Iterable<ConsumerRecord<byte[], byte[]>> records) {
         final int newQueueSize = partitionGroup.addRawRecords(partition, records);
 
@@ -966,7 +750,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         // if after adding these records, its partition queue's buffered size has been
         // increased beyond the threshold, we can then pause the consumption for this partition
         if (newQueueSize > maxBufferedSize) {
-            mainConsumer.pause(singleton(partition));
+            consumer.pause(singleton(partition));
         }
     }
 
@@ -998,7 +782,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
      * @param type      the punctuation type
      * @throws IllegalStateException if the current node is not null
      */
-    private Cancellable schedule(final long startTime, final long interval, final PunctuationType type, final Punctuator punctuator) {
+    Cancellable schedule(final long startTime, final long interval, final PunctuationType type, final Punctuator punctuator) {
         if (processorContext.currentNode() == null) {
             throw new IllegalStateException(String.format("%sCurrent node is null", logPrefix));
         }
@@ -1016,6 +800,13 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
             default:
                 throw new IllegalArgumentException("Unrecognized PunctuationType: " + type);
         }
+    }
+
+    /**
+     * @return The number of records left in the buffer of this task's partition group
+     */
+    int numBuffered() {
+        return partitionGroup.numBuffered();
     }
 
     /**
@@ -1062,15 +853,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         return punctuated;
     }
 
-    void maybeRecordE2ELatency(final long recordTimestamp, final long now, final String nodeName) {
-        final Sensor e2eLatencySensor = e2eLatencySensors.get(nodeName);
-        if (e2eLatencySensor == null) {
-            throw new IllegalStateException("Requested to record e2e latency but could not find sensor for node " + nodeName);
-        } else if (e2eLatencySensor.shouldRecord() && e2eLatencySensor.hasMetrics()) {
-            e2eLatencySensor.record(now - recordTimestamp, now);
-        }
-    }
-
     /**
      * Request committing the current task's state
      */
@@ -1081,176 +863,34 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
     /**
      * Whether or not a request has been made to commit the current state
      */
-    @Override
-    public boolean commitRequested() {
+    boolean commitRequested() {
         return commitRequested;
     }
 
-    static String encodeTimestamp(final long partitionTime) {
-        final ByteBuffer buffer = ByteBuffer.allocate(9);
-        buffer.put(LATEST_MAGIC_BYTE);
-        buffer.putLong(partitionTime);
-        return Base64.getEncoder().encodeToString(buffer.array());
-    }
-
-    long decodeTimestamp(final String encryptedString) {
-        if (encryptedString.isEmpty()) {
-            return RecordQueue.UNKNOWN;
-        }
-        final ByteBuffer buffer = ByteBuffer.wrap(Base64.getDecoder().decode(encryptedString));
-        final byte version = buffer.get();
-        switch (version) {
-            case LATEST_MAGIC_BYTE:
-                return buffer.getLong();
-            default:
-                log.warn("Unsupported offset metadata version found. Supported version {}. Found version {}.",
-                         LATEST_MAGIC_BYTE, version);
-                return RecordQueue.UNKNOWN;
-        }
-    }
-
-    @SuppressWarnings("rawtypes")
-    public InternalProcessorContext processorContext() {
-        return processorContext;
-    }
-
-    /**
-     * Produces a string representation containing useful information about a Task.
-     * This is useful in debugging scenarios.
-     *
-     * @return A string representation of the StreamTask instance.
-     */
-    @Override
-    public String toString() {
-        return toString("");
-    }
-
-    /**
-     * Produces a string representation containing useful information about a Task starting with the given indent.
-     * This is useful in debugging scenarios.
-     *
-     * @return A string representation of the Task instance.
-     */
-    public String toString(final String indent) {
-        final StringBuilder sb = new StringBuilder();
-        sb.append(indent);
-        sb.append("TaskId: ");
-        sb.append(id);
-        sb.append("\n");
-
-        // print topology
-        if (topology != null) {
-            sb.append(indent).append(topology.toString(indent + "\t"));
-        }
-
-        // print assigned partitions
-        final Set<TopicPartition> partitions = inputPartitions();
-        if (partitions != null && !partitions.isEmpty()) {
-            sb.append(indent).append("Partitions [");
-            for (final TopicPartition topicPartition : partitions) {
-                sb.append(topicPartition).append(", ");
-            }
-            sb.setLength(sb.length() - 2);
-            sb.append("]\n");
-        }
-        return sb.toString();
-    }
-
-    @Override
-    public boolean commitNeeded() {
-        return commitNeeded;
-    }
-
-    @Override
-    public Map<TopicPartition, Long> changelogOffsets() {
-        if (state() == State.RUNNING) {
-            // if we are in running state, just return the latest offset sentinel indicating
-            // we should be at the end of the changelog
-            return changelogPartitions().stream()
-                                        .collect(Collectors.toMap(Function.identity(), tp -> Task.LATEST_OFFSET));
-        } else {
-            return Collections.unmodifiableMap(stateMgr.changelogOffsets());
-        }
-    }
-
-    @Override
-    public Map<TopicPartition, Long> committedOffsets() {
-        return Collections.unmodifiableMap(committedOffsets);
-    }
-
-    @Override
-    public Map<TopicPartition, Long> highWaterMark() {
-        return Collections.unmodifiableMap(highWatermark);
-    }
-
-    private void transitToSuspend() {
-        log.info("Suspended {}", state());
-        transitionTo(State.SUSPENDED);
-        timeCurrentIdlingStarted = Optional.of(System.currentTimeMillis());
-    }
-
-    @Override
-    public Optional<Long> timeCurrentIdlingStarted() {
-        return timeCurrentIdlingStarted;
-    }
-
-    public void updateCommittedOffsets(final TopicPartition topicPartition, final Long offset) {
-        committedOffsets.put(topicPartition, offset);
-    }
-
-    public void updateEndOffsets(final TopicPartition topicPartition, final Long offset) {
-        highWatermark.put(topicPartition, offset);
-    }
-
-    public boolean hasRecordsQueued() {
-        return numBuffered() > 0;
-    }
-
+    // visible for testing only
     RecordCollector recordCollector() {
         return recordCollector;
     }
 
-    // below are visible for testing only
-    int numBuffered() {
-        return partitionGroup.numBuffered();
+    Producer<byte[], byte[]> getProducer() {
+        return producer;
     }
 
-    long streamTime() {
-        return partitionGroup.streamTime();
-    }
-
-    private class RecordQueueCreator {
-        private final LogContext logContext;
-        private final TimestampExtractor defaultTimestampExtractor;
-        private final DeserializationExceptionHandler defaultDeserializationExceptionHandler;
-
-        private RecordQueueCreator(final LogContext logContext,
-                                   final TimestampExtractor defaultTimestampExtractor,
-                                   final DeserializationExceptionHandler defaultDeserializationExceptionHandler) {
-            this.logContext = logContext;
-            this.defaultTimestampExtractor = defaultTimestampExtractor;
-            this.defaultDeserializationExceptionHandler = defaultDeserializationExceptionHandler;
-        }
-
-        public RecordQueue createQueue(final TopicPartition partition) {
-            final SourceNode<?, ?> source = topology.source(partition.topic());
-            if (source == null) {
-                throw new TopologyException(
-                        "Topic is unknown to the topology. " +
-                                "This may happen if different KafkaStreams instances of the same application execute different Topologies. " +
-                                "Note that Topologies are only identical if all operators are added in the same order."
-                );
-            }
-
-            final TimestampExtractor sourceTimestampExtractor = source.getTimestampExtractor();
-            final TimestampExtractor timestampExtractor = sourceTimestampExtractor != null ? sourceTimestampExtractor : defaultTimestampExtractor;
-            return new RecordQueue(
-                    partition,
-                    source,
-                    timestampExtractor,
-                    defaultDeserializationExceptionHandler,
-                    processorContext,
-                    logContext
+    private void initializeTransactions() {
+        try {
+            producer.initTransactions();
+        } catch (final TimeoutException retriable) {
+            log.error(
+                "Timeout exception caught when initializing transactions for task {}. " +
+                    "This might happen if the broker is slow to respond, if the network connection to " +
+                    "the broker was interrupted, or if similar circumstances arise. " +
+                    "You can increase producer parameter `max.block.ms` to increase this timeout.",
+                id,
+                retriable
+            );
+            throw new StreamsException(
+                format("%sFailed to initialize task %s due to timeout.", logPrefix, id),
+                retriable
             );
         }
     }

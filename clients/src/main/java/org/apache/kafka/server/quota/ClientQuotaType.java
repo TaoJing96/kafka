@@ -22,6 +22,5 @@ package org.apache.kafka.server.quota;
 public enum ClientQuotaType {
     PRODUCE,
     FETCH,
-    REQUEST,
-    CONTROLLER_MUTATION
+    REQUEST
 }

@@ -18,18 +18,18 @@ package kafka.server.epoch.util
 
 import java.net.SocketTimeoutException
 import java.util
+import java.util.Collections
+
 import kafka.cluster.BrokerEndPoint
 import kafka.server.BlockingSend
+import org.apache.kafka.clients.MockClient.MockMetadataUpdater
 import org.apache.kafka.clients.{ClientRequest, ClientResponse, MockClient, NetworkClientUtils}
-import org.apache.kafka.common.message.{FetchResponseData, OffsetForLeaderEpochResponseData}
-import org.apache.kafka.common.message.OffsetForLeaderEpochResponseData.{EpochEndOffset, OffsetForLeaderTopicResult}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.record.Records
 import org.apache.kafka.common.requests.AbstractRequest.Builder
-import org.apache.kafka.common.requests.{AbstractRequest, FetchResponse, OffsetsForLeaderEpochResponse, FetchMetadata => JFetchMetadata}
+import org.apache.kafka.common.requests.{AbstractRequest, EpochEndOffset, FetchResponse, OffsetsForLeaderEpochResponse, FetchMetadata => JFetchMetadata}
 import org.apache.kafka.common.utils.{SystemTime, Time}
 import org.apache.kafka.common.{Node, TopicPartition}
-
-import scala.collection.Map
 
 /**
   * Stub network client used for testing the ReplicaFetcher, wraps the MockClient used for consumer testing
@@ -44,25 +44,24 @@ class ReplicaFetcherMockBlockingSend(offsets: java.util.Map[TopicPartition, Epoc
                                      time: Time)
   extends BlockingSend {
 
-  private val client = new MockClient(new SystemTime)
+  private val client = new MockClient(new SystemTime, new MockMetadataUpdater {
+    override def fetchNodes(): util.List[Node] = Collections.emptyList()
+    override def isUpdateNeeded: Boolean = false
+    override def update(time: Time, update: MockClient.MetadataUpdate): Unit = {}
+  })
   var fetchCount = 0
   var epochFetchCount = 0
   var lastUsedOffsetForLeaderEpochVersion = -1
   var callback: Option[() => Unit] = None
-  var currentOffsets: util.Map[TopicPartition, EpochEndOffset] = offsets
-  var fetchPartitionData: Map[TopicPartition, FetchResponseData.PartitionData] = Map.empty
+  var currentOffsets: java.util.Map[TopicPartition, EpochEndOffset] = offsets
   private val sourceNode = new Node(sourceBroker.id, sourceBroker.host, sourceBroker.port)
 
-  def setEpochRequestCallback(postEpochFunction: () => Unit): Unit = {
+  def setEpochRequestCallback(postEpochFunction: () => Unit){
     callback = Some(postEpochFunction)
   }
 
-  def setOffsetsForNextResponse(newOffsets: util.Map[TopicPartition, EpochEndOffset]): Unit = {
+  def setOffsetsForNextResponse(newOffsets: java.util.Map[TopicPartition, EpochEndOffset]): Unit = {
     currentOffsets = newOffsets
-  }
-
-  def setFetchPartitionDataForNextResponse(partitionData: Map[TopicPartition, FetchResponseData.PartitionData]): Unit = {
-    fetchPartitionData = partitionData
   }
 
   override def sendRequest(requestBuilder: Builder[_ <: AbstractRequest]): ClientResponse = {
@@ -79,27 +78,12 @@ class ReplicaFetcherMockBlockingSend(offsets: java.util.Map[TopicPartition, Epoc
         callback.foreach(_.apply())
         epochFetchCount += 1
         lastUsedOffsetForLeaderEpochVersion = requestBuilder.latestAllowedVersion()
-
-        val data = new OffsetForLeaderEpochResponseData()
-        currentOffsets.forEach((tp, offsetForLeaderPartition) => {
-          var topic = data.topics.find(tp.topic)
-          if (topic == null) {
-            topic = new OffsetForLeaderTopicResult()
-              .setTopic(tp.topic)
-            data.topics.add(topic)
-          }
-          topic.partitions.add(offsetForLeaderPartition)
-        })
-
-        new OffsetsForLeaderEpochResponse(data)
+        new OffsetsForLeaderEpochResponse(currentOffsets)
 
       case ApiKeys.FETCH =>
         fetchCount += 1
-        val partitionData = new util.LinkedHashMap[TopicPartition, FetchResponseData.PartitionData]
-        fetchPartitionData.foreach { case (tp, data) => partitionData.put(tp, data) }
-        fetchPartitionData = Map.empty
-        FetchResponse.of(Errors.NONE, 0,
-          if (partitionData.isEmpty) JFetchMetadata.INVALID_SESSION_ID else 1, partitionData)
+        new FetchResponse(Errors.NONE, new java.util.LinkedHashMap[TopicPartition, FetchResponse.PartitionData[Records]], 0,
+          JFetchMetadata.INVALID_SESSION_ID)
 
       case _ =>
         throw new UnsupportedOperationException

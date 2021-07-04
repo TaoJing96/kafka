@@ -16,16 +16,16 @@
  */
 package org.apache.kafka.common.protocol;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 
 import java.util.HashSet;
 import java.util.Set;
 
 import org.apache.kafka.common.errors.ApiException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 public class ErrorsTest {
 
@@ -35,30 +35,30 @@ public class ErrorsTest {
         for (Errors error : Errors.values()) {
             codeSet.add(error.code());
         }
-        assertEquals(codeSet.size(), Errors.values().length, "Error codes must be unique");
+        assertEquals("Error codes must be unique", codeSet.size(), Errors.values().length);
     }
 
     @Test
     public void testUniqueExceptions() {
-        Set<Class<?>> exceptionSet = new HashSet<>();
+        Set<Class> exceptionSet = new HashSet<>();
         for (Errors error : Errors.values()) {
             if (error != Errors.NONE)
                 exceptionSet.add(error.exception().getClass());
         }
-        assertEquals(exceptionSet.size(), Errors.values().length - 1, "Exceptions must be unique"); // Ignore NONE
+        assertEquals("Exceptions must be unique", exceptionSet.size(), Errors.values().length - 1); // Ignore NONE
     }
 
     @Test
     public void testExceptionsAreNotGeneric() {
         for (Errors error : Errors.values()) {
             if (error != Errors.NONE)
-                assertNotEquals(error.exception().getClass(), ApiException.class, "Generic ApiException should not be used");
+                assertNotEquals("Generic ApiException should not be used", error.exception().getClass(), ApiException.class);
         }
     }
 
     @Test
     public void testNoneException() {
-        assertNull(Errors.NONE.exception(), "The NONE error should not have an exception");
+        assertNull("The NONE error should not have an exception", Errors.NONE.exception());
     }
 
     @Test
@@ -68,13 +68,13 @@ public class ErrorsTest {
         Errors expectedError = Errors.forException(new TimeoutException());
         Errors actualError = Errors.forException(new ExtendedTimeoutException());
 
-        assertEquals(expectedError, actualError, "forException should match super classes");
+        assertEquals("forException should match super classes", expectedError, actualError);
     }
 
     @Test
     public void testForExceptionDefault() {
         Errors error = Errors.forException(new ApiException());
-        assertEquals(Errors.UNKNOWN_SERVER_ERROR, error, "forException should default to unknown");
+        assertEquals("forException should default to unknown", Errors.UNKNOWN_SERVER_ERROR, error);
     }
 
     @Test

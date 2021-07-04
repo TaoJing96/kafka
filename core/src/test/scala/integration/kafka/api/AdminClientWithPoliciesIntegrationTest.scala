@@ -16,39 +16,43 @@ package kafka.api
 import java.util
 import java.util.Properties
 import java.util.concurrent.ExecutionException
+
 import kafka.integration.KafkaServerTestHarness
 import kafka.log.LogConfig
 import kafka.server.{Defaults, KafkaConfig}
 import kafka.utils.{Logging, TestUtils}
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, AlterConfigsOptions, Config, ConfigEntry}
+import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig, AlterConfigsOptions, Config, ConfigEntry}
 import org.apache.kafka.common.config.{ConfigResource, TopicConfig}
 import org.apache.kafka.common.errors.{InvalidRequestException, PolicyViolationException}
 import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.server.policy.AlterConfigPolicy
-import org.junit.jupiter.api.Assertions.{assertEquals, assertNull, assertThrows, assertTrue}
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test, Timeout}
+import org.junit.Assert.{assertEquals, assertNull, assertTrue}
+import org.junit.{After, Before, Rule, Test}
+import org.junit.rules.Timeout
+import org.scalatest.Assertions.intercept
 
-import scala.annotation.nowarn
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 
 /**
   * Tests AdminClient calls when the broker is configured with policies like AlterConfigPolicy, CreateTopicPolicy, etc.
   */
-@Timeout(120)
 class AdminClientWithPoliciesIntegrationTest extends KafkaServerTestHarness with Logging {
 
   import AdminClientWithPoliciesIntegrationTest._
 
-  var client: Admin = null
+  var client: AdminClient = null
   val brokerCount = 3
 
-  @BeforeEach
+  @Rule
+  def globalTimeout = Timeout.millis(120000)
+
+  @Before
   override def setUp(): Unit = {
-    super.setUp()
+    super.setUp
     TestUtils.waitUntilBrokerMetadataIsPropagated(servers)
   }
 
-  @AfterEach
+  @After
   override def tearDown(): Unit = {
     if (client != null)
       Utils.closeQuietly(client, "AdminClient")
@@ -66,7 +70,7 @@ class AdminClientWithPoliciesIntegrationTest extends KafkaServerTestHarness with
 
   @Test
   def testValidAlterConfigs(): Unit = {
-    client = Admin.create(createConfig)
+    client = AdminClient.create(createConfig)
     // Create topics
     val topic1 = "describe-alter-configs-topic-1"
     val topicResource1 = new ConfigResource(ConfigResource.Type.TOPIC, topic1)
@@ -79,19 +83,18 @@ class AdminClientWithPoliciesIntegrationTest extends KafkaServerTestHarness with
     val topicResource2 = new ConfigResource(ConfigResource.Type.TOPIC, topic2)
     createTopic(topic2, 1, 1)
 
-    PlaintextAdminIntegrationTest.checkValidAlterConfigs(client, topicResource1, topicResource2)
+    AdminClientIntegrationTest.checkValidAlterConfigs(client, topicResource1, topicResource2)
   }
 
   @Test
   def testInvalidAlterConfigs(): Unit = {
-    client = Admin.create(createConfig)
-    PlaintextAdminIntegrationTest.checkInvalidAlterConfigs(zkClient, servers, client)
+    client = AdminClient.create(createConfig)
+    AdminClientIntegrationTest.checkInvalidAlterConfigs(zkClient, servers, client)
   }
 
-  @nowarn("cat=deprecation")
   @Test
   def testInvalidAlterConfigsDueToPolicy(): Unit = {
-    client = Admin.create(createConfig)
+    client = AdminClient.create(createConfig)
 
     // Create topics
     val topic1 = "invalid-alter-configs-due-to-policy-topic-1"
@@ -127,18 +130,20 @@ class AdminClientWithPoliciesIntegrationTest extends KafkaServerTestHarness with
     ).asJava)
 
     assertEquals(Set(topicResource1, topicResource2, topicResource3, brokerResource).asJava, alterResult.values.keySet)
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(topicResource1).get).getCause.isInstanceOf[PolicyViolationException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(topicResource1).get).getCause.isInstanceOf[PolicyViolationException])
     alterResult.values.get(topicResource2).get
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(topicResource3).get).getCause.isInstanceOf[InvalidRequestException])
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(brokerResource).get).getCause.isInstanceOf[InvalidRequestException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(topicResource3).get).getCause.isInstanceOf[InvalidRequestException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(brokerResource).get).getCause.isInstanceOf[InvalidRequestException])
 
     // Verify that the second resource was updated and the others were not
     var describeResult = client.describeConfigs(Seq(topicResource1, topicResource2, topicResource3, brokerResource).asJava)
     var configs = describeResult.all.get
     assertEquals(4, configs.size)
 
-    assertEquals(Defaults.LogCleanerMinCleanRatio.toString, configs.get(topicResource1).get(LogConfig.MinCleanableDirtyRatioProp).value)
-    assertEquals(Defaults.MinInSyncReplicas.toString, configs.get(topicResource1).get(LogConfig.MinInSyncReplicasProp).value)
+    assertEquals(Defaults.LogCleanerMinCleanRatio.toString,
+      configs.get(topicResource1).get(LogConfig.MinCleanableDirtyRatioProp).value)
+    assertEquals(Defaults.MinInSyncReplicas.toString,
+      configs.get(topicResource1).get(LogConfig.MinInSyncReplicasProp).value)
 
     assertEquals("0.8", configs.get(topicResource2).get(LogConfig.MinCleanableDirtyRatioProp).value)
 
@@ -155,18 +160,20 @@ class AdminClientWithPoliciesIntegrationTest extends KafkaServerTestHarness with
     ).asJava, new AlterConfigsOptions().validateOnly(true))
 
     assertEquals(Set(topicResource1, topicResource2, topicResource3, brokerResource).asJava, alterResult.values.keySet)
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(topicResource1).get).getCause.isInstanceOf[PolicyViolationException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(topicResource1).get).getCause.isInstanceOf[PolicyViolationException])
     alterResult.values.get(topicResource2).get
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(topicResource3).get).getCause.isInstanceOf[InvalidRequestException])
-    assertTrue(assertThrows(classOf[ExecutionException], () => alterResult.values.get(brokerResource).get).getCause.isInstanceOf[InvalidRequestException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(topicResource3).get).getCause.isInstanceOf[InvalidRequestException])
+    assertTrue(intercept[ExecutionException](alterResult.values.get(brokerResource).get).getCause.isInstanceOf[InvalidRequestException])
 
     // Verify that no resources are updated since validate_only = true
     describeResult = client.describeConfigs(Seq(topicResource1, topicResource2, topicResource3, brokerResource).asJava)
     configs = describeResult.all.get
     assertEquals(4, configs.size)
 
-    assertEquals(Defaults.LogCleanerMinCleanRatio.toString, configs.get(topicResource1).get(LogConfig.MinCleanableDirtyRatioProp).value)
-    assertEquals(Defaults.MinInSyncReplicas.toString, configs.get(topicResource1).get(LogConfig.MinInSyncReplicasProp).value)
+    assertEquals(Defaults.LogCleanerMinCleanRatio.toString,
+      configs.get(topicResource1).get(LogConfig.MinCleanableDirtyRatioProp).value)
+    assertEquals(Defaults.MinInSyncReplicas.toString,
+      configs.get(topicResource1).get(LogConfig.MinInSyncReplicasProp).value)
 
     assertEquals("0.8", configs.get(topicResource2).get(LogConfig.MinCleanableDirtyRatioProp).value)
 

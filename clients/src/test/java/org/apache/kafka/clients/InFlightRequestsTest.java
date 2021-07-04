@@ -22,15 +22,14 @@ import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.Before;
+import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 public class InFlightRequestsTest {
 
@@ -38,7 +37,7 @@ public class InFlightRequestsTest {
     private int correlationId;
     private String dest = "dest";
 
-    @BeforeEach
+    @Before
     public void setup() {
         inFlightRequests = new InFlightRequests(12);
         correlationId = 0;
@@ -100,14 +99,14 @@ public class InFlightRequestsTest {
         assertEquals(0, inFlightRequests.count());
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void testCompleteNextThrowsIfNoInflights() {
-        assertThrows(IllegalStateException.class, () -> inFlightRequests.completeNext(dest));
+        inFlightRequests.completeNext(dest);
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void testCompleteLastSentThrowsIfNoInFlights() {
-        assertThrows(IllegalStateException.class, () -> inFlightRequests.completeLastSent(dest));
+        inFlightRequests.completeLastSent(dest);
     }
 
     private int addRequest(String destination) {

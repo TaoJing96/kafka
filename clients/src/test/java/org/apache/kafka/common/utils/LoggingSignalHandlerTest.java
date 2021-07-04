@@ -16,7 +16,7 @@
  */
 package org.apache.kafka.common.utils;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 public class LoggingSignalHandlerTest {
 

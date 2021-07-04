@@ -16,23 +16,25 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.streams.kstream.Windowed;
-import org.apache.kafka.streams.kstream.internals.SessionWindow;
-import org.apache.kafka.streams.state.KeyValueIterator;
-import org.apache.kafka.streams.state.SessionStore;
-import org.apache.kafka.streams.state.Stores;
-import org.junit.Test;
+import static java.time.Duration.ofMillis;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 import java.util.Arrays;
 import java.util.HashSet;
 
-import static java.time.Duration.ofMillis;
-import static org.apache.kafka.test.StreamsTestUtils.valuesToSet;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.kstream.internals.SessionWindow;
+import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
+import org.apache.kafka.streams.state.KeyValueIterator;
+import org.apache.kafka.streams.state.SessionStore;
+import org.apache.kafka.streams.state.Stores;
 
-public class InMemorySessionStoreTest extends AbstractSessionBytesStoreTest {
+import org.junit.Test;
+
+public class InMemorySessionStoreTest extends SessionBytesStoreTest {
 
     private static final String STORE_NAME = "in-memory session store";
 
@@ -46,6 +48,16 @@ public class InMemorySessionStoreTest extends AbstractSessionBytesStoreTest {
                 ofMillis(retentionPeriod)),
             keySerde,
             valueSerde).build();
+    }
+
+    @Override
+    String getMetricsScope() {
+        return new InMemorySessionBytesStoreSupplier(null, 0).metricsScope();
+    }
+
+    @Override
+    void setClassLoggerToDebug() {
+        LogCaptureAppender.setClassLoggerToDebug(InMemorySessionStore.class);
     }
 
     @Test

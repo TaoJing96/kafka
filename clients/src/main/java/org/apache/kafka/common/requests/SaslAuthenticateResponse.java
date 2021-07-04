@@ -18,11 +18,13 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.SaslAuthenticateResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Map;
+
 
 /**
  * Response from SASL server which for a SASL challenge as defined by the SASL protocol
@@ -33,8 +35,11 @@ public class SaslAuthenticateResponse extends AbstractResponse {
     private final SaslAuthenticateResponseData data;
 
     public SaslAuthenticateResponse(SaslAuthenticateResponseData data) {
-        super(ApiKeys.SASL_AUTHENTICATE);
         this.data = data;
+    }
+
+    public SaslAuthenticateResponse(Struct struct, short version) {
+        this.data = new SaslAuthenticateResponseData(struct, version);
     }
 
     /**
@@ -47,7 +52,7 @@ public class SaslAuthenticateResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return errorCounts(Errors.forCode(data.errorCode()));
+        return Collections.singletonMap(Errors.forCode(data.errorCode()), 1);
     }
 
     public String errorMessage() {
@@ -63,16 +68,11 @@ public class SaslAuthenticateResponse extends AbstractResponse {
     }
 
     @Override
-    public int throttleTimeMs() {
-        return DEFAULT_THROTTLE_TIME;
-    }
-
-    @Override
-    public SaslAuthenticateResponseData data() {
-        return data;
+    public Struct toStruct(short version) {
+        return data.toStruct(version);
     }
 
     public static SaslAuthenticateResponse parse(ByteBuffer buffer, short version) {
-        return new SaslAuthenticateResponse(new SaslAuthenticateResponseData(new ByteBufferAccessor(buffer), version));
+        return new SaslAuthenticateResponse(ApiKeys.SASL_AUTHENTICATE.parseResponse(version, buffer), version);
     }
 }

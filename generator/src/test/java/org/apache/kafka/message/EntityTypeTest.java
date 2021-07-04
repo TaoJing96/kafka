@@ -17,13 +17,15 @@
 
 package org.apache.kafka.message;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.Timeout;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.fail;
 
-@Timeout(120)
 public class EntityTypeTest {
+    @Rule
+    final public Timeout globalTimeout = Timeout.millis(120000);
 
     @Test
     public void testUnknownEntityType() {
@@ -63,7 +65,11 @@ public class EntityTypeTest {
     }
 
     private static void expectException(Runnable r) {
-        assertThrows(RuntimeException.class, r::run);
+        try {
+            r.run();
+            fail("expected an exception");
+        } catch (RuntimeException e) {
+        }
     }
 
     @Test

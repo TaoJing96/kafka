@@ -16,34 +16,26 @@
  */
 package org.apache.kafka.common.network;
 
-import java.io.IOException;
+import java.nio.ByteBuffer;
 
-public class NetworkSend implements Send {
-    private final String destinationId;
-    private final Send send;
+/**
+ * A size delimited Send that consists of a 4 byte network-ordered size N followed by N bytes of content
+ */
+public class NetworkSend extends ByteBufferSend {
 
-    public NetworkSend(String destinationId, Send send) {
-        this.destinationId = destinationId;
-        this.send = send;
+    public NetworkSend(String destination, ByteBuffer buffer) {
+        super(destination, sizeDelimit(buffer));
     }
 
-    public String destinationId() {
-        return destinationId;
+    private static ByteBuffer[] sizeDelimit(ByteBuffer buffer) {
+        return new ByteBuffer[] {sizeBuffer(buffer.remaining()), buffer};
     }
 
-    @Override
-    public boolean completed() {
-        return send.completed();
-    }
-
-    @Override
-    public long writeTo(TransferableChannel channel) throws IOException {
-        return send.writeTo(channel);
-    }
-
-    @Override
-    public long size() {
-        return send.size();
+    private static ByteBuffer sizeBuffer(int size) {
+        ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+        sizeBuffer.putInt(size);
+        sizeBuffer.rewind();
+        return sizeBuffer;
     }
 
 }

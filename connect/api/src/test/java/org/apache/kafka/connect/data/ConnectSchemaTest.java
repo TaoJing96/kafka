@@ -17,7 +17,7 @@
 package org.apache.kafka.connect.data;
 
 import org.apache.kafka.connect.errors.DataException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -28,10 +28,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 
 public class ConnectSchemaTest {
     private static final Schema MAP_INT_STRING_SCHEMA = SchemaBuilder.map(Schema.INT32_SCHEMA, Schema.STRING_SCHEMA).build();
@@ -67,10 +66,9 @@ public class ConnectSchemaTest {
     }
 
 
-    @Test
+    @Test(expected = DataException.class)
     public void testFieldsOnlyValidForStructs() {
-        assertThrows(DataException.class,
-            Schema.INT8_SCHEMA::fields);
+        Schema.INT8_SCHEMA.fields();
     }
 
     @Test
@@ -111,140 +109,128 @@ public class ConnectSchemaTest {
     // To avoid requiring excessive numbers of tests, these checks for invalid types use a similar type where possible
     // to only include a single test for each type
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchInt8() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.INT8_SCHEMA, 1));
+        ConnectSchema.validateValue(Schema.INT8_SCHEMA, 1);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchInt16() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.INT16_SCHEMA, 1));
+        ConnectSchema.validateValue(Schema.INT16_SCHEMA, 1);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchInt32() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.INT32_SCHEMA, (long) 1));
+        ConnectSchema.validateValue(Schema.INT32_SCHEMA, (long) 1);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchInt64() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.INT64_SCHEMA, 1));
+        ConnectSchema.validateValue(Schema.INT64_SCHEMA, 1);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchFloat() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.FLOAT32_SCHEMA, 1.0));
+        ConnectSchema.validateValue(Schema.FLOAT32_SCHEMA, 1.0);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchDouble() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.FLOAT64_SCHEMA, 1.f));
+        ConnectSchema.validateValue(Schema.FLOAT64_SCHEMA, 1.f);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchBoolean() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.BOOLEAN_SCHEMA, 1.f));
+        ConnectSchema.validateValue(Schema.BOOLEAN_SCHEMA, 1.f);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchString() {
         // CharSequence is a similar type (supertype of String), but we restrict to String.
         CharBuffer cbuf = CharBuffer.wrap("abc");
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.STRING_SCHEMA, cbuf));
+        ConnectSchema.validateValue(Schema.STRING_SCHEMA, cbuf);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchBytes() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(Schema.BYTES_SCHEMA, new Object[]{1, "foo"}));
+        ConnectSchema.validateValue(Schema.BYTES_SCHEMA, new Object[]{1, "foo"});
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchArray() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(SchemaBuilder.array(Schema.INT32_SCHEMA).build(), Arrays.asList("a", "b", "c")));
+        ConnectSchema.validateValue(SchemaBuilder.array(Schema.INT32_SCHEMA).build(), Arrays.asList("a", "b", "c"));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchArraySomeMatch() {
         // Even if some match the right type, this should fail if any mismatch. In this case, type erasure loses
         // the fact that the list is actually List<Object>, but we couldn't tell if only checking the first element
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(SchemaBuilder.array(Schema.INT32_SCHEMA).build(), Arrays.asList(1, 2, "c")));
+        ConnectSchema.validateValue(SchemaBuilder.array(Schema.INT32_SCHEMA).build(), Arrays.asList(1, 2, "c"));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchMapKey() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, Collections.singletonMap("wrong key type", "value")));
+        ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, Collections.singletonMap("wrong key type", "value"));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchMapValue() {
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, Collections.singletonMap(1, 2)));
+        ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, Collections.singletonMap(1, 2));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchMapSomeKeys() {
         Map<Object, String> data = new HashMap<>();
         data.put(1, "abc");
         data.put("wrong", "it's as easy as one two three");
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, data));
+        ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, data);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchMapSomeValues() {
         Map<Integer, Object> data = new HashMap<>();
         data.put(1, "abc");
         data.put(2, "wrong".getBytes());
-        assertThrows(DataException.class,
-            () -> ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, data));
+        ConnectSchema.validateValue(MAP_INT_STRING_SCHEMA, data);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchStructWrongSchema() {
         // Completely mismatching schemas
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(FLAT_STRUCT_SCHEMA,
-            new Struct(SchemaBuilder.struct().field("x", Schema.INT32_SCHEMA).build()).put("x", 1)));
+        ConnectSchema.validateValue(
+                FLAT_STRUCT_SCHEMA,
+                new Struct(SchemaBuilder.struct().field("x", Schema.INT32_SCHEMA).build()).put("x", 1)
+        );
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchStructWrongNestedSchema() {
         // Top-level schema  matches, but nested does not.
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(PARENT_STRUCT_SCHEMA,
-            new Struct(PARENT_STRUCT_SCHEMA)
-                .put("nested", new Struct(SchemaBuilder.struct()
-                    .field("x", Schema.INT32_SCHEMA).build()).put("x", 1))));
+        ConnectSchema.validateValue(
+                PARENT_STRUCT_SCHEMA,
+                new Struct(PARENT_STRUCT_SCHEMA)
+                        .put("nested", new Struct(SchemaBuilder.struct().field("x", Schema.INT32_SCHEMA).build()).put("x", 1))
+        );
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchDecimal() {
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(Decimal.schema(2), new BigInteger("156")));
+        ConnectSchema.validateValue(Decimal.schema(2), new BigInteger("156"));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchDate() {
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(Date.SCHEMA, 1000L));
+        ConnectSchema.validateValue(Date.SCHEMA, 1000L);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchTime() {
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(Time.SCHEMA, 1000L));
+        ConnectSchema.validateValue(Time.SCHEMA, 1000L);
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testValidateValueMismatchTimestamp() {
-        assertThrows(DataException.class, () -> ConnectSchema.validateValue(Timestamp.SCHEMA, 1000L));
+        ConnectSchema.validateValue(Timestamp.SCHEMA, 1000L);
     }
 
     @Test

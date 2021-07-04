@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2018 Joan Goyeau.
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -19,54 +21,53 @@ package org.apache.kafka.streams.scala.kstream
 import org.apache.kafka.streams.Topology
 import org.apache.kafka.streams.kstream.internals.ConsumedInternal
 import org.apache.kafka.streams.processor.FailOnInvalidTimestamp
-import org.apache.kafka.streams.scala.serialization.Serdes
-import org.apache.kafka.streams.scala.serialization.Serdes._
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
+import org.apache.kafka.streams.scala.Serdes._
+import org.apache.kafka.streams.scala.Serdes
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{FlatSpec, Matchers}
 
-class ConsumedTest {
+@RunWith(classOf[JUnitRunner])
+class ConsumedTest extends FlatSpec with Matchers {
 
-  @Test
-  def testCreateConsumed(): Unit = {
+  "Create a Consumed" should "create a Consumed with Serdes" in {
     val consumed: Consumed[String, Long] = Consumed.`with`[String, Long]
 
     val internalConsumed = new ConsumedInternal(consumed)
-    assertEquals(Serdes.stringSerde.getClass, internalConsumed.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalConsumed.valueSerde.getClass)
+    internalConsumed.keySerde.getClass shouldBe Serdes.String.getClass
+    internalConsumed.valueSerde.getClass shouldBe Serdes.Long.getClass
   }
 
-  @Test
-  def testCreateConsumedWithTimestampExtractorAndResetPolicy(): Unit = {
+  "Create a Consumed with timestampExtractor and resetPolicy" should "create a Consumed with Serdes, timestampExtractor and resetPolicy" in {
     val timestampExtractor = new FailOnInvalidTimestamp()
     val resetPolicy = Topology.AutoOffsetReset.LATEST
     val consumed: Consumed[String, Long] =
       Consumed.`with`[String, Long](timestampExtractor, resetPolicy)
 
     val internalConsumed = new ConsumedInternal(consumed)
-    assertEquals(Serdes.stringSerde.getClass, internalConsumed.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalConsumed.valueSerde.getClass)
-    assertEquals(timestampExtractor, internalConsumed.timestampExtractor)
-    assertEquals(resetPolicy, internalConsumed.offsetResetPolicy)
+    internalConsumed.keySerde.getClass shouldBe Serdes.String.getClass
+    internalConsumed.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalConsumed.timestampExtractor shouldBe timestampExtractor
+    internalConsumed.offsetResetPolicy shouldBe resetPolicy
   }
 
-  @Test
-  def testCreateConsumedWithTimestampExtractor(): Unit = {
+  "Create a Consumed with timestampExtractor" should "create a Consumed with Serdes and timestampExtractor" in {
     val timestampExtractor = new FailOnInvalidTimestamp()
     val consumed: Consumed[String, Long] = Consumed.`with`[String, Long](timestampExtractor)
 
     val internalConsumed = new ConsumedInternal(consumed)
-    assertEquals(Serdes.stringSerde.getClass, internalConsumed.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalConsumed.valueSerde.getClass)
-    assertEquals(timestampExtractor, internalConsumed.timestampExtractor)
+    internalConsumed.keySerde.getClass shouldBe Serdes.String.getClass
+    internalConsumed.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalConsumed.timestampExtractor shouldBe timestampExtractor
   }
-  @Test
-  def testCreateConsumedWithResetPolicy(): Unit = {
+
+  "Create a Consumed with resetPolicy" should "create a Consumed with Serdes and resetPolicy" in {
     val resetPolicy = Topology.AutoOffsetReset.LATEST
     val consumed: Consumed[String, Long] = Consumed.`with`[String, Long](resetPolicy)
 
     val internalConsumed = new ConsumedInternal(consumed)
-    assertEquals(Serdes.stringSerde.getClass, internalConsumed.keySerde.getClass)
-    assertEquals(Serdes.longSerde.getClass, internalConsumed.valueSerde.getClass)
-    assertEquals(resetPolicy, internalConsumed.offsetResetPolicy)
+    internalConsumed.keySerde.getClass shouldBe Serdes.String.getClass
+    internalConsumed.valueSerde.getClass shouldBe Serdes.Long.getClass
+    internalConsumed.offsetResetPolicy shouldBe resetPolicy
   }
 }

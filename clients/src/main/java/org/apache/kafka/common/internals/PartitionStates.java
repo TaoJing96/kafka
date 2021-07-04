@@ -20,13 +20,12 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.BiConsumer;
+import java.util.stream.Stream;
 
 /**
  * This class is a useful building block for doing fetch requests where topic partitions have to be rotated via
@@ -86,16 +85,23 @@ public class PartitionStates<S> {
         return map.containsKey(topicPartition);
     }
 
-    public Iterator<S> stateIterator() {
-        return map.values().iterator();
+    /**
+     * Returns the partition states in order.
+     */
+    public List<PartitionState<S>> partitionStates() {
+        List<PartitionState<S>> result = new ArrayList<>();
+        for (Map.Entry<TopicPartition, S> entry : map.entrySet()) {
+            result.add(new PartitionState<>(entry.getKey(), entry.getValue()));
+        }
+        return result;
     }
 
-    public void forEach(BiConsumer<TopicPartition, S> biConsumer) {
-        map.forEach(biConsumer);
+    public Stream<PartitionState<S>> stream() {
+        return map.entrySet().stream().map(entry -> new PartitionState<>(entry.getKey(), entry.getValue()));
     }
 
-    public Map<TopicPartition, S> partitionStateMap() {
-        return Collections.unmodifiableMap(map);
+    public LinkedHashMap<TopicPartition, S> partitionStateMap() {
+        return new LinkedHashMap<>(map);
     }
 
     /**

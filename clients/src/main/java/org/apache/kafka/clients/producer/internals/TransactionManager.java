@@ -16,20 +16,9 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientResponse;
-import org.apache.kafka.clients.NodeApiVersions;
 import org.apache.kafka.clients.RequestCompletionHandler;
-import org.apache.kafka.clients.consumer.CommitFailedException;
-import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.errors.InvalidPidMappingException;
-import org.apache.kafka.common.errors.InvalidProducerEpochException;
-import org.apache.kafka.common.errors.RetriableException;
-import org.apache.kafka.common.errors.UnknownProducerIdException;
-import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersion;
-import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.utils.ProducerIdAndEpoch;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
@@ -41,8 +30,6 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.errors.TransactionalIdAuthorizationException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.message.AddOffsetsToTxnRequestData;
-import org.apache.kafka.common.message.EndTxnRequestData;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.message.InitProducerIdRequestData;
 import org.apache.kafka.common.protocol.Errors;
@@ -58,7 +45,6 @@ import org.apache.kafka.common.requests.EndTxnRequest;
 import org.apache.kafka.common.requests.EndTxnResponse;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
 import org.apache.kafka.common.requests.FindCoordinatorRequest.CoordinatorType;
-import org.apache.kafka.common.requests.FindCoordinatorRequest.NoBatchedFindCoordinatorsException;
 import org.apache.kafka.common.requests.FindCoordinatorResponse;
 import org.apache.kafka.common.requests.InitProducerIdRequest;
 import org.apache.kafka.common.requests.InitProducerIdResponse;
@@ -68,16 +54,13 @@ import org.apache.kafka.common.requests.TxnOffsetCommitRequest;
 import org.apache.kafka.common.requests.TxnOffsetCommitRequest.CommittedOffset;
 import org.apache.kafka.common.requests.TxnOffsetCommitResponse;
 import org.apache.kafka.common.utils.LogContext;
-import org.apache.kafka.common.utils.PrimitiveRef;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -85,8 +68,12 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+
+import static org.apache.kafka.common.record.RecordBatch.NO_PRODUCER_EPOCH;
+import static org.apache.kafka.common.record.RecordBatch.NO_PRODUCER_ID;
 
 /**
  * A class which maintains state for transactions. Also keeps the state necessary to ensure idempotent production.
@@ -98,75 +85,50 @@ public class TransactionManager {
     private final Logger log;
     private final String transactionalId;
     private final int transactionTimeoutMs;
-    private final ApiVersions apiVersions;
-    private boolean batchFindCoordinator = true;
 
     private static class TopicPartitionBookkeeper {
 
-        private final Map<TopicPartition, TopicPartitionEntry> topicPartitions = new HashMap<>();
+        private final Map<TopicPartition, TopicPartitionEntry> topicPartitionBookkeeping = new HashMap<>();
 
-        private TopicPartitionEntry getPartition(TopicPartition topicPartition) {
-            TopicPartitionEntry ent = topicPartitions.get(topicPartition);
+        public TopicPartitionEntry getPartition(TopicPartition topic) {
+            TopicPartitionEntry ent = topicPartitionBookkeeping.get(topic);
             if (ent == null)
-                throw new IllegalStateException("Trying to get the sequence number for " + topicPartition +
+                throw new IllegalStateException("Trying to get the sequence number for " + topic +
                         ", but the sequence number was never set for this partition.");
             return ent;
         }
 
-        private TopicPartitionEntry getOrCreatePartition(TopicPartition topicPartition) {
-            TopicPartitionEntry ent = topicPartitions.get(topicPartition);
-            if (ent == null) {
-                ent = new TopicPartitionEntry();
-                topicPartitions.put(topicPartition, ent);
-            }
-            return ent;
+        public void addPartition(TopicPartition topic) {
+            if (!topicPartitionBookkeeping.containsKey(topic))
+                topicPartitionBookkeeping.put(topic, new TopicPartitionEntry());
         }
 
-        private void addPartition(TopicPartition topicPartition) {
-            this.topicPartitions.putIfAbsent(topicPartition, new TopicPartitionEntry());
+        boolean contains(TopicPartition partition) {
+            return topicPartitionBookkeeping.containsKey(partition);
         }
 
-        private boolean contains(TopicPartition topicPartition) {
-            return topicPartitions.containsKey(topicPartition);
+        public void reset() {
+            topicPartitionBookkeeping.clear();
         }
 
-        private void reset() {
-            topicPartitions.clear();
-        }
-
-        private OptionalLong lastAckedOffset(TopicPartition topicPartition) {
-            TopicPartitionEntry entry = topicPartitions.get(topicPartition);
+        OptionalLong lastAckedOffset(TopicPartition partition) {
+            TopicPartitionEntry entry = topicPartitionBookkeeping.get(partition);
             if (entry != null && entry.lastAckedOffset != ProduceResponse.INVALID_OFFSET)
                 return OptionalLong.of(entry.lastAckedOffset);
             else
                 return OptionalLong.empty();
         }
 
-        private OptionalInt lastAckedSequence(TopicPartition topicPartition) {
-            TopicPartitionEntry entry = topicPartitions.get(topicPartition);
+        OptionalInt lastAckedSequence(TopicPartition partition) {
+            TopicPartitionEntry entry = topicPartitionBookkeeping.get(partition);
             if (entry != null && entry.lastAckedSequence != NO_LAST_ACKED_SEQUENCE_NUMBER)
                 return OptionalInt.of(entry.lastAckedSequence);
             else
                 return OptionalInt.empty();
         }
-
-        private void startSequencesAtBeginning(TopicPartition topicPartition, ProducerIdAndEpoch newProducerIdAndEpoch) {
-            final PrimitiveRef.IntRef sequence = PrimitiveRef.ofInt(0);
-            TopicPartitionEntry topicPartitionEntry = getPartition(topicPartition);
-            topicPartitionEntry.resetSequenceNumbers(inFlightBatch -> {
-                inFlightBatch.resetProducerState(newProducerIdAndEpoch, sequence.value, inFlightBatch.isTransactional());
-                sequence.value += inFlightBatch.recordCount;
-            });
-            topicPartitionEntry.producerIdAndEpoch = newProducerIdAndEpoch;
-            topicPartitionEntry.nextSequence = sequence.value;
-            topicPartitionEntry.lastAckedSequence = NO_LAST_ACKED_SEQUENCE_NUMBER;
-        }
     }
 
     private static class TopicPartitionEntry {
-
-        // The producer id/epoch being used for a given partition.
-        private ProducerIdAndEpoch producerIdAndEpoch;
 
         // The base sequence of the next batch bound for a given partition.
         private int nextSequence;
@@ -186,14 +148,13 @@ public class TransactionManager {
         private long lastAckedOffset;
 
         TopicPartitionEntry() {
-            this.producerIdAndEpoch = ProducerIdAndEpoch.NONE;
             this.nextSequence = 0;
             this.lastAckedSequence = NO_LAST_ACKED_SEQUENCE_NUMBER;
             this.lastAckedOffset = ProduceResponse.INVALID_OFFSET;
             this.inflightBatchesBySequence = new TreeSet<>(Comparator.comparingInt(ProducerBatch::baseSequence));
         }
 
-        void resetSequenceNumbers(Consumer<ProducerBatch> resetSequence) {
+        public void resetSequenceNumbers(Consumer<ProducerBatch> resetSequence) {
             TreeSet<ProducerBatch> newInflights = new TreeSet<>(Comparator.comparingInt(ProducerBatch::baseSequence));
             for (ProducerBatch inflightBatch : inflightBatchesBySequence) {
                 resetSequence.accept(inflightBatch);
@@ -201,6 +162,7 @@ public class TransactionManager {
             }
             inflightBatchesBySequence = newInflights;
         }
+
     }
 
     private final TopicPartitionBookkeeper topicPartitionBookkeeper;
@@ -213,14 +175,7 @@ public class TransactionManager {
     // successfully (indicating that the expired batch actually made it to the broker). If we don't get any successful
     // responses for the partition once the inflight request count falls to zero, we reset the producer id and
     // consequently clear this data structure as well.
-    // The value of the map is the sequence number of the batch following the expired one, computed by adding its
-    // record count to its sequence number. This is used to tell if a subsequent batch is the one immediately following
-    // the expired one.
-    private final Map<TopicPartition, Integer> partitionsWithUnresolvedSequences;
-
-    // The partitions that have received an error that triggers an epoch bump. When the epoch is bumped, these
-    // partitions will have the sequences of their in-flight batches rewritten
-    private final Set<TopicPartition> partitionsToRewriteSequences;
+    private final Set<TopicPartition> partitionsWithUnresolvedSequences;
 
     private final PriorityQueue<TxnRequestHandler> pendingRequests;
     private final Set<TopicPartition> newPartitionsInTransaction;
@@ -240,13 +195,11 @@ public class TransactionManager {
     private int inFlightRequestCorrelationId = NO_INFLIGHT_REQUEST_CORRELATION_ID;
     private Node transactionCoordinator;
     private Node consumerGroupCoordinator;
-    private boolean coordinatorSupportsBumpingEpoch;
 
     private volatile State currentState = State.UNINITIALIZED;
     private volatile RuntimeException lastError = null;
     private volatile ProducerIdAndEpoch producerIdAndEpoch;
     private volatile boolean transactionStarted = false;
-    private volatile boolean epochBumpRequired = false;
 
     private enum State {
         UNINITIALIZED,
@@ -260,10 +213,8 @@ public class TransactionManager {
 
         private boolean isTransitionValid(State source, State target) {
             switch (target) {
-                case UNINITIALIZED:
-                    return source == READY;
                 case INITIALIZING:
-                    return source == UNINITIALIZED || source == ABORTING_TRANSACTION;
+                    return source == UNINITIALIZED;
                 case READY:
                     return source == INITIALIZING || source == COMMITTING_TRANSACTION || source == ABORTING_TRANSACTION;
                 case IN_TRANSACTION:
@@ -286,14 +237,12 @@ public class TransactionManager {
 
     // We use the priority to determine the order in which requests need to be sent out. For instance, if we have
     // a pending FindCoordinator request, that must always go first. Next, If we need a producer id, that must go second.
-    // The endTxn request must always go last, unless we are bumping the epoch (a special case of InitProducerId) as
-    // part of ending the transaction.
+    // The endTxn request must always go last.
     private enum Priority {
         FIND_COORDINATOR(0),
         INIT_PRODUCER_ID(1),
         ADD_PARTITIONS_OR_OFFSETS(2),
-        END_TXN(3),
-        EPOCH_BUMP(4);
+        END_TXN(3);
 
         final int priority;
 
@@ -302,12 +251,8 @@ public class TransactionManager {
         }
     }
 
-    public TransactionManager(final LogContext logContext,
-                              final String transactionalId,
-                              final int transactionTimeoutMs,
-                              final long retryBackoffMs,
-                              final ApiVersions apiVersions) {
-        this.producerIdAndEpoch = ProducerIdAndEpoch.NONE;
+    public TransactionManager(LogContext logContext, String transactionalId, int transactionTimeoutMs, long retryBackoffMs) {
+        this.producerIdAndEpoch = new ProducerIdAndEpoch(NO_PRODUCER_ID, NO_PRODUCER_EPOCH);
         this.transactionalId = transactionalId;
         this.log = logContext.logger(TransactionManager.class);
         this.transactionTimeoutMs = transactionTimeoutMs;
@@ -318,34 +263,23 @@ public class TransactionManager {
         this.partitionsInTransaction = new HashSet<>();
         this.pendingRequests = new PriorityQueue<>(10, Comparator.comparingInt(o -> o.priority().priority));
         this.pendingTxnOffsetCommits = new HashMap<>();
-        this.partitionsWithUnresolvedSequences = new HashMap<>();
-        this.partitionsToRewriteSequences = new HashSet<>();
+        this.partitionsWithUnresolvedSequences = new HashSet<>();
         this.retryBackoffMs = retryBackoffMs;
         this.topicPartitionBookkeeper = new TopicPartitionBookkeeper();
-        this.apiVersions = apiVersions;
+    }
+
+    TransactionManager() {
+        this(new LogContext(), null, 0, 100L);
     }
 
     public synchronized TransactionalRequestResult initializeTransactions() {
-        return initializeTransactions(ProducerIdAndEpoch.NONE);
-    }
-
-    synchronized TransactionalRequestResult initializeTransactions(ProducerIdAndEpoch producerIdAndEpoch) {
-        boolean isEpochBump = producerIdAndEpoch != ProducerIdAndEpoch.NONE;
         return handleCachedTransactionRequestResult(() -> {
-            // If this is an epoch bump, we will transition the state as part of handling the EndTxnRequest
-            if (!isEpochBump) {
-                transitionTo(State.INITIALIZING);
-                log.info("Invoking InitProducerId for the first time in order to acquire a producer ID");
-            } else {
-                log.info("Invoking InitProducerId with current producer ID and epoch {} in order to bump the epoch", producerIdAndEpoch);
-            }
+            transitionTo(State.INITIALIZING);
+            setProducerIdAndEpoch(ProducerIdAndEpoch.NONE);
             InitProducerIdRequestData requestData = new InitProducerIdRequestData()
                     .setTransactionalId(transactionalId)
-                    .setTransactionTimeoutMs(transactionTimeoutMs)
-                    .setProducerId(producerIdAndEpoch.producerId)
-                    .setProducerEpoch(producerIdAndEpoch.epoch);
-            InitProducerIdHandler handler = new InitProducerIdHandler(new InitProducerIdRequest.Builder(requestData),
-                    isEpochBump);
+                    .setTransactionTimeoutMs(transactionTimeoutMs);
+            InitProducerIdHandler handler = new InitProducerIdHandler(new InitProducerIdRequest.Builder(requestData));
             enqueueRequest(handler);
             return handler.result;
         }, State.INITIALIZING);
@@ -380,51 +314,32 @@ public class TransactionManager {
     private TransactionalRequestResult beginCompletingTransaction(TransactionResult transactionResult) {
         if (!newPartitionsInTransaction.isEmpty())
             enqueueRequest(addPartitionsToTransactionHandler());
-
-        // If the error is an INVALID_PRODUCER_ID_MAPPING error, the server will not accept an EndTxnRequest, so skip
-        // directly to InitProducerId. Otherwise, we must first abort the transaction, because the producer will be
-        // fenced if we directly call InitProducerId.
-        if (!(lastError instanceof InvalidPidMappingException)) {
-            EndTxnRequest.Builder builder = new EndTxnRequest.Builder(
-                    new EndTxnRequestData()
-                            .setTransactionalId(transactionalId)
-                            .setProducerId(producerIdAndEpoch.producerId)
-                            .setProducerEpoch(producerIdAndEpoch.epoch)
-                            .setCommitted(transactionResult.id));
-
-            EndTxnHandler handler = new EndTxnHandler(builder);
-            enqueueRequest(handler);
-            if (!epochBumpRequired) {
-                return handler.result;
-            }
-        }
-
-        return initializeTransactions(this.producerIdAndEpoch);
+        EndTxnRequest.Builder builder = new EndTxnRequest.Builder(transactionalId, producerIdAndEpoch.producerId,
+                producerIdAndEpoch.epoch, transactionResult);
+        EndTxnHandler handler = new EndTxnHandler(builder);
+        enqueueRequest(handler);
+        return handler.result;
     }
 
-    public synchronized TransactionalRequestResult sendOffsetsToTransaction(final Map<TopicPartition, OffsetAndMetadata> offsets,
-                                                                            final ConsumerGroupMetadata groupMetadata) {
+    public synchronized TransactionalRequestResult sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
+                                                                            String consumerGroupId) {
         ensureTransactional();
         maybeFailWithError();
         if (currentState != State.IN_TRANSACTION)
             throw new KafkaException("Cannot send offsets to transaction either because the producer is not in an " +
                     "active transaction");
 
-        log.debug("Begin adding offsets {} for consumer group {} to transaction", offsets, groupMetadata);
-        AddOffsetsToTxnRequest.Builder builder = new AddOffsetsToTxnRequest.Builder(
-            new AddOffsetsToTxnRequestData()
-                .setTransactionalId(transactionalId)
-                .setProducerId(producerIdAndEpoch.producerId)
-                .setProducerEpoch(producerIdAndEpoch.epoch)
-                .setGroupId(groupMetadata.groupId())
-        );
-        AddOffsetsToTxnHandler handler = new AddOffsetsToTxnHandler(builder, offsets, groupMetadata);
-
+        log.debug("Begin adding offsets {} for consumer group {} to transaction", offsets, consumerGroupId);
+        AddOffsetsToTxnRequest.Builder builder = new AddOffsetsToTxnRequest.Builder(transactionalId,
+            producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, consumerGroupId);
+        AddOffsetsToTxnHandler handler = new AddOffsetsToTxnHandler(builder, offsets);
         enqueueRequest(handler);
         return handler.result;
     }
 
     public synchronized void maybeAddPartitionToTransaction(TopicPartition topicPartition) {
+        failIfNotReadyForSend();
+
         if (isPartitionAdded(topicPartition) || isPartitionPendingAdd(topicPartition))
             return;
 
@@ -437,7 +352,7 @@ public class TransactionManager {
         return lastError;
     }
 
-    public synchronized void failIfNotReadyForSend() {
+    synchronized void failIfNotReadyForSend() {
         if (hasError())
             throw new KafkaException("Cannot perform send because at least one previous transactional or " +
                     "idempotent request has failed with errors.", lastError);
@@ -492,18 +407,11 @@ public class TransactionManager {
                     "aborted. Underlying exception: ", exception);
             return;
         }
-
-        log.info("Transiting to abortable error state due to {}", exception.toString());
         transitionTo(State.ABORTABLE_ERROR, exception);
     }
 
     synchronized void transitionToFatalError(RuntimeException exception) {
-        log.info("Transiting to fatal error state due to {}", exception.toString());
         transitionTo(State.FATAL_ERROR, exception);
-
-        if (pendingResult != null) {
-            pendingResult.fail(exception);
-        }
     }
 
     // visible for testing
@@ -526,99 +434,63 @@ public class TransactionManager {
         return producerIdAndEpoch;
     }
 
-    synchronized public void maybeUpdateProducerIdAndEpoch(TopicPartition topicPartition) {
-        if (hasStaleProducerIdAndEpoch(topicPartition) && !hasInflightBatches(topicPartition)) {
-            // If the batch was on a different ID and/or epoch (due to an epoch bump) and all its in-flight batches
-            // have completed, reset the partition sequence so that the next batch (with the new epoch) starts from 0
-            topicPartitionBookkeeper.startSequencesAtBeginning(topicPartition, this.producerIdAndEpoch);
-            log.debug("ProducerId of partition {} set to {} with epoch {}. Reinitialize sequence at beginning.",
-                      topicPartition, producerIdAndEpoch.producerId, producerIdAndEpoch.epoch);
-        }
+    boolean hasProducerId(long producerId) {
+        return producerIdAndEpoch.producerId == producerId;
+    }
+
+    boolean hasProducerIdAndEpoch(long producerId, short producerEpoch) {
+        ProducerIdAndEpoch idAndEpoch = this.producerIdAndEpoch;
+        return idAndEpoch.producerId == producerId && idAndEpoch.epoch == producerEpoch;
     }
 
     /**
      * Set the producer id and epoch atomically.
      */
-    private void setProducerIdAndEpoch(ProducerIdAndEpoch producerIdAndEpoch) {
+    void setProducerIdAndEpoch(ProducerIdAndEpoch producerIdAndEpoch) {
         log.info("ProducerId set to {} with epoch {}", producerIdAndEpoch.producerId, producerIdAndEpoch.epoch);
         this.producerIdAndEpoch = producerIdAndEpoch;
     }
 
     /**
-     * This method resets the producer ID and epoch and sets the state to UNINITIALIZED, which will trigger a new
-     * InitProducerId request. This method is only called when the producer epoch is exhausted; we will bump the epoch
-     * instead.
+     * This method is used when the producer needs to reset its internal state because of an irrecoverable exception
+     * from the broker.
+     *
+     * We need to reset the producer id and associated state when we have sent a batch to the broker, but we either get
+     * a non-retriable exception or we run out of retries, or the batch expired in the producer queue after it was already
+     * sent to the broker.
+     *
+     * In all of these cases, we don't know whether batch was actually committed on the broker, and hence whether the
+     * sequence number was actually updated. If we don't reset the producer state, we risk the chance that all future
+     * messages will return an OutOfOrderSequenceException.
+     *
+     * Note that we can't reset the producer state for the transactional producer as this would mean bumping the epoch
+     * for the same producer id. This might involve aborting the ongoing transaction during the initPidRequest, and the user
+     * would not have any way of knowing this happened. So for the transactional producer, it's best to return the
+     * produce error to the user and let them abort the transaction and close the producer explicitly.
      */
-    private void resetIdempotentProducerId() {
+    synchronized void resetProducerId() {
         if (isTransactional())
             throw new IllegalStateException("Cannot reset producer state for a transactional producer. " +
                     "You must either abort the ongoing transaction or reinitialize the transactional producer instead");
-        log.debug("Resetting idempotent producer ID. ID and epoch before reset are {}", this.producerIdAndEpoch);
         setProducerIdAndEpoch(ProducerIdAndEpoch.NONE);
-        transitionTo(State.UNINITIALIZED);
-    }
-
-    private void resetSequenceForPartition(TopicPartition topicPartition) {
-        topicPartitionBookkeeper.topicPartitions.remove(topicPartition);
-        this.partitionsWithUnresolvedSequences.remove(topicPartition);
-    }
-
-    private void resetSequenceNumbers() {
         topicPartitionBookkeeper.reset();
         this.partitionsWithUnresolvedSequences.clear();
     }
 
-    synchronized void requestEpochBumpForPartition(TopicPartition tp) {
-        epochBumpRequired = true;
-        this.partitionsToRewriteSequences.add(tp);
-    }
-
-    private void bumpIdempotentProducerEpoch() {
-        if (this.producerIdAndEpoch.epoch == Short.MAX_VALUE) {
-            resetIdempotentProducerId();
-        } else {
-            setProducerIdAndEpoch(new ProducerIdAndEpoch(this.producerIdAndEpoch.producerId, (short) (this.producerIdAndEpoch.epoch + 1)));
-            log.debug("Incremented producer epoch, current producer ID and epoch are now {}", this.producerIdAndEpoch);
-        }
-
-        // When the epoch is bumped, rewrite all in-flight sequences for the partition(s) that triggered the epoch bump
-        for (TopicPartition topicPartition : this.partitionsToRewriteSequences) {
-            this.topicPartitionBookkeeper.startSequencesAtBeginning(topicPartition, this.producerIdAndEpoch);
-            this.partitionsWithUnresolvedSequences.remove(topicPartition);
-        }
-        this.partitionsToRewriteSequences.clear();
-
-        epochBumpRequired = false;
-    }
-
-    synchronized void bumpIdempotentEpochAndResetIdIfNeeded() {
-        if (!isTransactional()) {
-            if (epochBumpRequired) {
-                bumpIdempotentProducerEpoch();
-            }
-            if (currentState != State.INITIALIZING && !hasProducerId()) {
-                transitionTo(State.INITIALIZING);
-                InitProducerIdRequestData requestData = new InitProducerIdRequestData()
-                        .setTransactionalId(null)
-                        .setTransactionTimeoutMs(Integer.MAX_VALUE);
-                InitProducerIdHandler handler = new InitProducerIdHandler(new InitProducerIdRequest.Builder(requestData), false);
-                enqueueRequest(handler);
-            }
-        }
+    synchronized void resetProducerIdIfNeeded() {
+        if (shouldResetProducerStateAfterResolvingSequences())
+            // Check if the previous run expired batches which requires a reset of the producer state.
+            resetProducerId();
     }
 
     /**
      * Returns the next sequence number to be written to the given TopicPartition.
      */
     synchronized Integer sequenceNumber(TopicPartition topicPartition) {
-        return topicPartitionBookkeeper.getOrCreatePartition(topicPartition).nextSequence;
-    }
+        if (!isTransactional())
+            topicPartitionBookkeeper.addPartition(topicPartition);
 
-    /**
-     * Returns the current producer id/epoch of the given TopicPartition.
-     */
-    synchronized ProducerIdAndEpoch producerIdAndEpoch(TopicPartition topicPartition) {
-        return topicPartitionBookkeeper.getOrCreatePartition(topicPartition).producerIdAndEpoch;
+        return topicPartitionBookkeeper.getPartition(topicPartition).nextSequence;
     }
 
     synchronized void incrementSequenceNumber(TopicPartition topicPartition, int increment) {
@@ -663,14 +535,9 @@ public class TransactionManager {
         }
     }
 
-    private int maybeUpdateLastAckedSequence(TopicPartition topicPartition, int sequence) {
-        int lastAckedSequence = lastAckedSequence(topicPartition).orElse(NO_LAST_ACKED_SEQUENCE_NUMBER);
-        if (sequence > lastAckedSequence) {
+    private void maybeUpdateLastAckedSequence(TopicPartition topicPartition, int sequence) {
+        if (sequence > lastAckedSequence(topicPartition).orElse(NO_LAST_ACKED_SEQUENCE_NUMBER))
             topicPartitionBookkeeper.getPartition(topicPartition).lastAckedSequence = sequence;
-            return sequence;
-        }
-
-        return lastAckedSequence;
     }
 
     synchronized OptionalInt lastAckedSequence(TopicPartition topicPartition) {
@@ -700,11 +567,18 @@ public class TransactionManager {
     }
 
     public synchronized void handleCompletedBatch(ProducerBatch batch, ProduceResponse.PartitionResponse response) {
-        int lastAckedSequence = maybeUpdateLastAckedSequence(batch.topicPartition, batch.lastSequence());
+        if (!hasProducerIdAndEpoch(batch.producerId(), batch.producerEpoch())) {
+            log.debug("Ignoring completed batch {} with producer id {}, epoch {}, and sequence number {} " +
+                            "since the producerId has been reset internally", batch, batch.producerId(),
+                    batch.producerEpoch(), batch.baseSequence());
+            return;
+        }
+
+        maybeUpdateLastAckedSequence(batch.topicPartition, batch.baseSequence() + batch.recordCount - 1);
         log.debug("ProducerId: {}; Set last ack'd sequence number for topic-partition {} to {}",
                 batch.producerId(),
                 batch.topicPartition,
-                lastAckedSequence);
+                lastAckedSequence(batch.topicPartition).orElse(-1));
 
         updateLastAckedOffset(response, batch);
         removeInFlightBatch(batch);
@@ -717,20 +591,16 @@ public class TransactionManager {
                 || exception instanceof UnsupportedVersionException) {
             transitionToFatalError(exception);
         } else if (isTransactional()) {
-            if (canBumpEpoch() && !isCompleting()) {
-                epochBumpRequired = true;
-            }
             transitionToAbortableError(exception);
         }
     }
 
-    synchronized void handleFailedBatch(ProducerBatch batch, RuntimeException exception, boolean adjustSequenceNumbers) {
+    public synchronized void handleFailedBatch(ProducerBatch batch, RuntimeException exception, boolean adjustSequenceNumbers) {
         maybeTransitionToErrorState(exception);
-        removeInFlightBatch(batch);
 
-        if (hasFatalError()) {
-            log.debug("Ignoring batch {} with producer id {}, epoch {}, and sequence number {} " +
-                            "since the producer is already in fatal error state", batch, batch.producerId(),
+        if (!hasProducerIdAndEpoch(batch.producerId(), batch.producerEpoch())) {
+            log.debug("Ignoring failed batch {} with producer id {}, epoch {}, and sequence number {} " +
+                    "since the producerId has been reset internally", batch, batch.producerId(),
                     batch.producerEpoch(), batch.baseSequence(), exception);
             return;
         }
@@ -739,24 +609,14 @@ public class TransactionManager {
             log.error("The broker returned {} for topic-partition {} with producerId {}, epoch {}, and sequence number {}",
                     exception, batch.topicPartition, batch.producerId(), batch.producerEpoch(), batch.baseSequence());
 
-            // If we fail with an OutOfOrderSequenceException, we have a gap in the log. Bump the epoch for this
-            // partition, which will reset the sequence number to 0 and allow us to continue
-            requestEpochBumpForPartition(batch.topicPartition);
-        } else if (exception instanceof UnknownProducerIdException) {
-            // If we get an UnknownProducerId for a partition, then the broker has no state for that producer. It will
-            // therefore accept a write with sequence number 0. We reset the sequence number for the partition here so
-            // that the producer can continue after aborting the transaction. All inflight-requests to this partition
-            // will also fail with an UnknownProducerId error, so the sequence will remain at 0. Note that if the
-            // broker supports bumping the epoch, we will later reset all sequence numbers after calling InitProducerId
-            resetSequenceForPartition(batch.topicPartition);
+            // Reset the producerId since we have hit an irrecoverable exception and cannot make any guarantees
+            // about the previously committed message. Note that this will discard the producer id and sequence
+            // numbers for all existing partitions.
+            resetProducerId();
         } else {
-            if (adjustSequenceNumbers) {
-                if (!isTransactional()) {
-                    requestEpochBumpForPartition(batch.topicPartition);
-                } else {
-                    adjustSequencesDueToFailedBatch(batch);
-                }
-            }
+            removeInFlightBatch(batch);
+            if (adjustSequenceNumbers)
+                adjustSequencesDueToFailedBatch(batch);
         }
     }
 
@@ -790,15 +650,26 @@ public class TransactionManager {
 
             log.info("Resetting sequence number of batch with current sequence {} for partition {} to {}", inFlightBatch.baseSequence(), batch.topicPartition, newSequence);
             inFlightBatch.resetProducerState(new ProducerIdAndEpoch(inFlightBatch.producerId(), inFlightBatch.producerEpoch()), newSequence, inFlightBatch.isTransactional());
+
         });
     }
 
-    synchronized boolean hasInflightBatches(TopicPartition topicPartition) {
-        return !topicPartitionBookkeeper.getOrCreatePartition(topicPartition).inflightBatchesBySequence.isEmpty();
+    private void startSequencesAtBeginning(TopicPartition topicPartition) {
+        final AtomicInteger sequence = new AtomicInteger(0);
+        topicPartitionBookkeeper.getPartition(topicPartition).resetSequenceNumbers(inFlightBatch -> {
+            log.info("Resetting sequence number of batch with current sequence {} for partition {} to {}",
+                    inFlightBatch.baseSequence(), inFlightBatch.topicPartition, sequence.get());
+            inFlightBatch.resetProducerState(new ProducerIdAndEpoch(inFlightBatch.producerId(),
+                    inFlightBatch.producerEpoch()), sequence.get(), inFlightBatch.isTransactional());
+            sequence.getAndAdd(inFlightBatch.recordCount);
+        });
+        setNextSequence(topicPartition, sequence.get());
+        topicPartitionBookkeeper.getPartition(topicPartition).lastAckedSequence = NO_LAST_ACKED_SEQUENCE_NUMBER;
     }
 
-    synchronized boolean hasStaleProducerIdAndEpoch(TopicPartition topicPartition) {
-        return !producerIdAndEpoch.equals(topicPartitionBookkeeper.getOrCreatePartition(topicPartition).producerIdAndEpoch);
+    private boolean hasInflightBatches(TopicPartition topicPartition) {
+        return topicPartitionBookkeeper.contains(topicPartition)
+                && !topicPartitionBookkeeper.getPartition(topicPartition).inflightBatchesBySequence.isEmpty();
     }
 
     synchronized boolean hasUnresolvedSequences() {
@@ -806,24 +677,24 @@ public class TransactionManager {
     }
 
     synchronized boolean hasUnresolvedSequence(TopicPartition topicPartition) {
-        return partitionsWithUnresolvedSequences.containsKey(topicPartition);
+        return partitionsWithUnresolvedSequences.contains(topicPartition);
     }
 
-    synchronized void markSequenceUnresolved(ProducerBatch batch) {
-        int nextSequence = batch.lastSequence() + 1;
-        partitionsWithUnresolvedSequences.compute(batch.topicPartition,
-            (k, v) -> v == null ? nextSequence : Math.max(v, nextSequence));
-        log.debug("Marking partition {} unresolved with next sequence number {}", batch.topicPartition,
-                partitionsWithUnresolvedSequences.get(batch.topicPartition));
+    synchronized void markSequenceUnresolved(TopicPartition topicPartition) {
+        log.debug("Marking partition {} unresolved", topicPartition);
+        partitionsWithUnresolvedSequences.add(topicPartition);
     }
 
-    // Attempts to resolve unresolved sequences. If all in-flight requests are complete and some partitions are still
-    // unresolved, either bump the epoch if possible, or transition to a fatal error
-    synchronized void maybeResolveSequences() {
-        for (Iterator<TopicPartition> iter = partitionsWithUnresolvedSequences.keySet().iterator(); iter.hasNext(); ) {
+    // Checks if there are any partitions with unresolved partitions which may now be resolved. Returns true if
+    // the producer id needs a reset, false otherwise.
+    private boolean shouldResetProducerStateAfterResolvingSequences() {
+        if (isTransactional())
+            // We should not reset producer state if we are transactional. We will transition to a fatal error instead.
+            return false;
+        for (Iterator<TopicPartition> iter = partitionsWithUnresolvedSequences.iterator(); iter.hasNext(); ) {
             TopicPartition topicPartition = iter.next();
             if (!hasInflightBatches(topicPartition)) {
-                // The partition has been fully drained. At this point, the last ack'd sequence should be one less than
+                // The partition has been fully drained. At this point, the last ack'd sequence should be once less than
                 // next sequence destined for the partition. If so, the partition is fully resolved. If not, we should
                 // reset the sequence number if necessary.
                 if (isNextSequence(topicPartition, sequenceNumber(topicPartition))) {
@@ -831,31 +702,14 @@ public class TransactionManager {
                     iter.remove();
                 } else {
                     // We would enter this branch if all in flight batches were ultimately expired in the producer.
-                    if (isTransactional()) {
-                        // For the transactional producer, we bump the epoch if possible, otherwise we transition to a fatal error
-                        String unackedMessagesErr = "The client hasn't received acknowledgment for some previously " +
-                                "sent messages and can no longer retry them. ";
-                        if (canBumpEpoch()) {
-                            epochBumpRequired = true;
-                            KafkaException exception = new KafkaException(unackedMessagesErr + "It is safe to abort " +
-                                    "the transaction and continue.");
-                            transitionToAbortableError(exception);
-                        } else {
-                            KafkaException exception = new KafkaException(unackedMessagesErr + "It isn't safe to continue.");
-                            transitionToFatalError(exception);
-                        }
-                    } else {
-                        // For the idempotent producer, bump the epoch
-                        log.info("No inflight batches remaining for {}, last ack'd sequence for partition is {}, next sequence is {}. " +
-                                        "Going to bump epoch and reset sequence numbers.", topicPartition,
-                                lastAckedSequence(topicPartition).orElse(NO_LAST_ACKED_SEQUENCE_NUMBER), sequenceNumber(topicPartition));
-                        requestEpochBumpForPartition(topicPartition);
-                    }
-
-                    iter.remove();
+                    log.info("No inflight batches remaining for {}, last ack'd sequence for partition is {}, next sequence is {}. " +
+                            "Going to reset producer state.", topicPartition,
+                            lastAckedSequence(topicPartition).orElse(NO_LAST_ACKED_SEQUENCE_NUMBER), sequenceNumber(topicPartition));
+                    return true;
                 }
             }
         }
+        return false;
     }
 
     private boolean isNextSequence(TopicPartition topicPartition, int sequence) {
@@ -866,12 +720,7 @@ public class TransactionManager {
         topicPartitionBookkeeper.getPartition(topicPartition).nextSequence = sequence;
     }
 
-    private boolean isNextSequenceForUnresolvedPartition(TopicPartition topicPartition, int sequence) {
-        return this.hasUnresolvedSequence(topicPartition) &&
-                sequence == this.partitionsWithUnresolvedSequences.get(topicPartition);
-    }
-
-    synchronized TxnRequestHandler nextRequest(boolean hasIncompleteBatches) {
+    synchronized TxnRequestHandler nextRequestHandler(boolean hasIncompleteBatches) {
         if (!newPartitionsInTransaction.isEmpty())
             enqueueRequest(addPartitionsToTransactionHandler());
 
@@ -921,7 +770,8 @@ public class TransactionManager {
         pendingRequests.forEach(handler ->
                 handler.fatalError(shutdownException));
         if (pendingResult != null) {
-            pendingResult.fail(shutdownException);
+            pendingResult.setError(shutdownException);
+            pendingResult.done();
         }
     }
 
@@ -948,7 +798,7 @@ public class TransactionManager {
         inFlightRequestCorrelationId = NO_INFLIGHT_REQUEST_CORRELATION_ID;
     }
 
-    boolean hasInFlightRequest() {
+    boolean hasInFlightTransactionalRequest() {
         return inFlightRequestCorrelationId != NO_INFLIGHT_REQUEST_CORRELATION_ID;
     }
 
@@ -983,16 +833,23 @@ public class TransactionManager {
     }
 
     synchronized boolean canRetry(ProduceResponse.PartitionResponse response, ProducerBatch batch) {
-        Errors error = response.error;
+        if (!hasProducerIdAndEpoch(batch.producerId(), batch.producerEpoch()))
+            return false;
 
-        // An UNKNOWN_PRODUCER_ID means that we have lost the producer state on the broker. Depending on the log start
-        // offset, we may want to retry these, as described for each case below. If none of those apply, then for the
-        // idempotent producer, we will locally bump the epoch and reset the sequence numbers of in-flight batches from
-        // sequence 0, then retry the failed batch, which should now succeed. For the transactional producer, allow the
-        // batch to fail. When processing the failed batch, we will transition to an abortable error and set a flag
-        // indicating that we need to bump the epoch (if supported by the broker).
+        Errors error = response.error;
+        if (error == Errors.OUT_OF_ORDER_SEQUENCE_NUMBER && !hasUnresolvedSequence(batch.topicPartition) &&
+                (batch.sequenceHasBeenReset() || !isNextSequence(batch.topicPartition, batch.baseSequence())))
+            // We should retry the OutOfOrderSequenceException if the batch is _not_ the next batch, ie. its base
+            // sequence isn't the lastAckedSequence + 1. However, if the first in flight batch fails fatally, we will
+            // adjust the sequences of the other inflight batches to account for the 'loss' of the sequence range in
+            // the batch which failed. In this case, an inflight batch will have a base sequence which is
+            // the lastAckedSequence + 1 after adjustment. When this batch fails with an OutOfOrderSequence, we want to retry it.
+            // To account for the latter case, we check whether the sequence has been reset since the last drain.
+            // If it has, we will retry it anyway.
+            return true;
+
         if (error == Errors.UNKNOWN_PRODUCER_ID) {
-            if (response.logStartOffset == -1) {
+            if (response.logStartOffset == -1)
                 // We don't know the log start offset with this response. We should just retry the request until we get it.
                 // The UNKNOWN_PRODUCER_ID error code was added along with the new ProduceResponse which includes the
                 // logStartOffset. So the '-1' sentinel is not for backward compatibility. Instead, it is possible for
@@ -1001,7 +858,6 @@ public class TransactionManager {
                 // response was being constructed. In these cases, we should just retry the request: we are guaranteed
                 // to eventually get a logStartOffset once things settle down.
                 return true;
-            }
 
             if (batch.sequenceHasBeenReset()) {
                 // When the first inflight batch fails due to the truncation case, then the sequences of all the other
@@ -1011,60 +867,18 @@ public class TransactionManager {
                 return true;
             } else if (lastAckedOffset(batch.topicPartition).orElse(NO_LAST_ACKED_SEQUENCE_NUMBER) < response.logStartOffset) {
                 // The head of the log has been removed, probably due to the retention time elapsing. In this case,
-                // we expect to lose the producer state. For the transactional producer, reset the sequences of all
-                // inflight batches to be from the beginning and retry them, so that the transaction does not need to
-                // be aborted. For the idempotent producer, bump the epoch to avoid reusing (sequence, epoch) pairs
-                if (isTransactional()) {
-                    topicPartitionBookkeeper.startSequencesAtBeginning(batch.topicPartition, this.producerIdAndEpoch);
-                } else {
-                    requestEpochBumpForPartition(batch.topicPartition);
-                }
-                return true;
-            }
-
-            if (!isTransactional()) {
-                // For the idempotent producer, always retry UNKNOWN_PRODUCER_ID errors. If the batch has the current
-                // producer ID and epoch, request a bump of the epoch. Otherwise just retry the produce.
-                requestEpochBumpForPartition(batch.topicPartition);
-                return true;
-            }
-        } else if (error == Errors.OUT_OF_ORDER_SEQUENCE_NUMBER) {
-            if (!hasUnresolvedSequence(batch.topicPartition) &&
-                    (batch.sequenceHasBeenReset() || !isNextSequence(batch.topicPartition, batch.baseSequence()))) {
-                // We should retry the OutOfOrderSequenceException if the batch is _not_ the next batch, ie. its base
-                // sequence isn't the lastAckedSequence + 1.
-                return true;
-            } else if (!isTransactional()) {
-                // For the idempotent producer, retry all OUT_OF_ORDER_SEQUENCE_NUMBER errors. If there are no
-                // unresolved sequences, or this batch is the one immediately following an unresolved sequence, we know
-                // there is actually a gap in the sequences, and we bump the epoch. Otherwise, retry without bumping
-                // and wait to see if the sequence resolves
-                if (!hasUnresolvedSequence(batch.topicPartition) ||
-                        isNextSequenceForUnresolvedPartition(batch.topicPartition, batch.baseSequence())) {
-                    requestEpochBumpForPartition(batch.topicPartition);
-                }
+                // we expect to lose the producer state. Reset the sequences of all inflight batches to be from the beginning
+                // and retry them.
+                startSequencesAtBeginning(batch.topicPartition);
                 return true;
             }
         }
-
-        // If neither of the above cases are true, retry if the exception is retriable
-        return error.exception() instanceof RetriableException;
+        return false;
     }
 
     // visible for testing
     synchronized boolean isReady() {
         return isTransactional() && currentState == State.READY;
-    }
-
-    void handleCoordinatorReady() {
-        NodeApiVersions nodeApiVersions = transactionCoordinator != null ?
-                apiVersions.get(transactionCoordinator.idString()) :
-                null;
-        ApiVersion initProducerIdVersion = nodeApiVersions != null ?
-                nodeApiVersions.apiVersion(ApiKeys.INIT_PRODUCER_ID) :
-                null;
-        this.coordinatorSupportsBumpingEpoch = initProducerIdVersion != null &&
-                initProducerIdVersion.maxVersion() >= 3;
     }
 
     private void transitionTo(State target) {
@@ -1106,8 +920,6 @@ public class TransactionManager {
             if (lastError instanceof ProducerFencedException) {
                 throw new ProducerFencedException("The producer has been rejected from the broker because " +
                     "it tried to use an old epoch with the transactionalId");
-            } else if (lastError instanceof InvalidProducerEpochException) {
-                throw new InvalidProducerEpochException("Producer attempted to produce with an old epoch " + producerIdAndEpoch);
             } else {
                 throw new KafkaException("Cannot execute transactional method because we are in an error state", lastError);
             }
@@ -1143,48 +955,41 @@ public class TransactionManager {
                 throw new IllegalStateException("Invalid coordinator type: " + type);
         }
 
-        FindCoordinatorRequestData data = new FindCoordinatorRequestData()
-                .setKeyType(type.id());
-        if (batchFindCoordinator) {
-            data.setCoordinatorKeys(Collections.singletonList(coordinatorKey));
-        } else {
-            data.setKey(coordinatorKey);
-        }
-        FindCoordinatorRequest.Builder builder = new FindCoordinatorRequest.Builder(data);
+        FindCoordinatorRequest.Builder builder = new FindCoordinatorRequest.Builder(
+                new FindCoordinatorRequestData()
+                    .setKeyType(type.id())
+                    .setKey(coordinatorKey));
         enqueueRequest(new FindCoordinatorHandler(builder));
+    }
+
+    private void completeTransaction() {
+        transitionTo(State.READY);
+        lastError = null;
+        transactionStarted = false;
+        newPartitionsInTransaction.clear();
+        pendingPartitionsInTransaction.clear();
+        partitionsInTransaction.clear();
     }
 
     private TxnRequestHandler addPartitionsToTransactionHandler() {
         pendingPartitionsInTransaction.addAll(newPartitionsInTransaction);
         newPartitionsInTransaction.clear();
-        AddPartitionsToTxnRequest.Builder builder =
-            new AddPartitionsToTxnRequest.Builder(transactionalId,
-                producerIdAndEpoch.producerId,
-                producerIdAndEpoch.epoch,
-                new ArrayList<>(pendingPartitionsInTransaction));
+        AddPartitionsToTxnRequest.Builder builder = new AddPartitionsToTxnRequest.Builder(transactionalId,
+                producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, new ArrayList<>(pendingPartitionsInTransaction));
         return new AddPartitionsToTxnHandler(builder);
     }
 
     private TxnOffsetCommitHandler txnOffsetCommitHandler(TransactionalRequestResult result,
                                                           Map<TopicPartition, OffsetAndMetadata> offsets,
-                                                          ConsumerGroupMetadata groupMetadata) {
+                                                          String consumerGroupId) {
         for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
             OffsetAndMetadata offsetAndMetadata = entry.getValue();
             CommittedOffset committedOffset = new CommittedOffset(offsetAndMetadata.offset(),
                     offsetAndMetadata.metadata(), offsetAndMetadata.leaderEpoch());
             pendingTxnOffsetCommits.put(entry.getKey(), committedOffset);
         }
-
-        final TxnOffsetCommitRequest.Builder builder =
-            new TxnOffsetCommitRequest.Builder(transactionalId,
-                groupMetadata.groupId(),
-                producerIdAndEpoch.producerId,
-                producerIdAndEpoch.epoch,
-                pendingTxnOffsetCommits,
-                groupMetadata.memberId(),
-                groupMetadata.generationId(),
-                groupMetadata.groupInstanceId()
-            );
+        TxnOffsetCommitRequest.Builder builder = new TxnOffsetCommitRequest.Builder(transactionalId, consumerGroupId,
+                producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, pendingTxnOffsetCommits);
         return new TxnOffsetCommitHandler(result, builder);
     }
 
@@ -1204,29 +1009,6 @@ public class TransactionManager {
         return pendingResult;
     }
 
-    // package-private for testing
-    boolean canBumpEpoch() {
-        if (!isTransactional()) {
-            return true;
-        }
-
-        return coordinatorSupportsBumpingEpoch;
-    }
-
-    private void completeTransaction() {
-        if (epochBumpRequired) {
-            transitionTo(State.INITIALIZING);
-        } else {
-            transitionTo(State.READY);
-        }
-        lastError = null;
-        epochBumpRequired = false;
-        transactionStarted = false;
-        newPartitionsInTransaction.clear();
-        pendingPartitionsInTransaction.clear();
-        partitionsInTransaction.clear();
-    }
-
     abstract class TxnRequestHandler implements RequestCompletionHandler {
         protected final TransactionalRequestResult result;
         private boolean isRetry = false;
@@ -1240,26 +1022,20 @@ public class TransactionManager {
         }
 
         void fatalError(RuntimeException e) {
-            result.fail(e);
+            result.setError(e);
             transitionToFatalError(e);
+            result.done();
         }
 
         void abortableError(RuntimeException e) {
-            result.fail(e);
+            result.setError(e);
             transitionToAbortableError(e);
-        }
-
-        void abortableErrorIfPossible(RuntimeException e) {
-            if (canBumpEpoch()) {
-                epochBumpRequired = true;
-                abortableError(e);
-            } else {
-                fatalError(e);
-            }
+            result.done();
         }
 
         void fail(RuntimeException e) {
-            result.fail(e);
+            result.setError(e);
+            result.done();
         }
 
         void reenqueue() {
@@ -1283,9 +1059,6 @@ public class TransactionManager {
                     log.debug("Disconnected from {}. Will retry.", response.destination());
                     if (this.needsCoordinator())
                         lookupCoordinator(this.coordinatorType(), this.coordinatorKey());
-                    reenqueue();
-                } else if (response.versionMismatch() instanceof NoBatchedFindCoordinatorsException && response.requestHeader().apiKey() == ApiKeys.FIND_COORDINATOR) {
-                    batchFindCoordinator = false;
                     reenqueue();
                 } else if (response.versionMismatch() != null) {
                     fatalError(response.versionMismatch());
@@ -1334,12 +1107,10 @@ public class TransactionManager {
 
     private class InitProducerIdHandler extends TxnRequestHandler {
         private final InitProducerIdRequest.Builder builder;
-        private final boolean isEpochBump;
 
-        private InitProducerIdHandler(InitProducerIdRequest.Builder builder, boolean isEpochBump) {
+        private InitProducerIdHandler(InitProducerIdRequest.Builder builder) {
             super("InitProducerId");
             this.builder = builder;
-            this.isEpochBump = isEpochBump;
         }
 
         @Override
@@ -1349,16 +1120,7 @@ public class TransactionManager {
 
         @Override
         Priority priority() {
-            return this.isEpochBump ? Priority.EPOCH_BUMP : Priority.INIT_PRODUCER_ID;
-        }
-
-        @Override
-        FindCoordinatorRequest.CoordinatorType coordinatorType() {
-            if (isTransactional()) {
-                return FindCoordinatorRequest.CoordinatorType.TRANSACTION;
-            } else {
-                return null;
-            }
+            return Priority.INIT_PRODUCER_ID;
         }
 
         @Override
@@ -1367,27 +1129,19 @@ public class TransactionManager {
             Errors error = initProducerIdResponse.error();
 
             if (error == Errors.NONE) {
-                ProducerIdAndEpoch producerIdAndEpoch = new ProducerIdAndEpoch(initProducerIdResponse.data().producerId(),
-                        initProducerIdResponse.data().producerEpoch());
+                ProducerIdAndEpoch producerIdAndEpoch = new ProducerIdAndEpoch(initProducerIdResponse.data.producerId(),
+                        initProducerIdResponse.data.producerEpoch());
                 setProducerIdAndEpoch(producerIdAndEpoch);
                 transitionTo(State.READY);
                 lastError = null;
-                if (this.isEpochBump) {
-                    resetSequenceNumbers();
-                }
                 result.done();
             } else if (error == Errors.NOT_COORDINATOR || error == Errors.COORDINATOR_NOT_AVAILABLE) {
                 lookupCoordinator(FindCoordinatorRequest.CoordinatorType.TRANSACTION, transactionalId);
                 reenqueue();
             } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS || error == Errors.CONCURRENT_TRANSACTIONS) {
                 reenqueue();
-            } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED ||
-                    error == Errors.CLUSTER_AUTHORIZATION_FAILED) {
+            } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
-            } else if (error == Errors.INVALID_PRODUCER_EPOCH || error == Errors.PRODUCER_FENCED) {
-                // We could still receive INVALID_PRODUCER_EPOCH from old versioned transaction coordinator,
-                // just treat it the same as PRODUCE_FENCED.
-                fatalError(Errors.PRODUCER_FENCED.exception());
             } else {
                 fatalError(new KafkaException("Unexpected error in InitProducerIdResponse; " + error.message()));
             }
@@ -1439,15 +1193,14 @@ public class TransactionManager {
                 } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS || error == Errors.UNKNOWN_TOPIC_OR_PARTITION) {
                     reenqueue();
                     return;
-                } else if (error == Errors.INVALID_PRODUCER_EPOCH || error == Errors.PRODUCER_FENCED) {
-                    // We could still receive INVALID_PRODUCER_EPOCH from old versioned transaction coordinator,
-                    // just treat it the same as PRODUCE_FENCED.
-                    fatalError(Errors.PRODUCER_FENCED.exception());
+                } else if (error == Errors.INVALID_PRODUCER_EPOCH) {
+                    fatalError(error.exception());
                     return;
                 } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                     fatalError(error.exception());
                     return;
-                } else if (error == Errors.INVALID_TXN_STATE) {
+                } else if (error == Errors.INVALID_PRODUCER_ID_MAPPING
+                        || error == Errors.INVALID_TXN_STATE) {
                     fatalError(new KafkaException(error.exception()));
                     return;
                 } else if (error == Errors.TOPIC_AUTHORIZATION_FAILED) {
@@ -1456,9 +1209,6 @@ public class TransactionManager {
                     log.debug("Did not attempt to add partition {} to transaction because other partitions in the " +
                             "batch had errors.", topicPartition);
                     hasPartitionErrors = true;
-                } else if (error == Errors.UNKNOWN_PRODUCER_ID || error == Errors.INVALID_PRODUCER_ID_MAPPING) {
-                    abortableErrorIfPossible(error.exception());
-                    return;
                 } else {
                     log.error("Could not add partition {} due to unexpected error {}", topicPartition, error);
                     hasPartitionErrors = true;
@@ -1534,52 +1284,29 @@ public class TransactionManager {
         @Override
         public void handleResponse(AbstractResponse response) {
             FindCoordinatorResponse findCoordinatorResponse = (FindCoordinatorResponse) response;
+            Errors error = findCoordinatorResponse.error();
             CoordinatorType coordinatorType = CoordinatorType.forId(builder.data().keyType());
 
-            if (batchFindCoordinator && findCoordinatorResponse.data().coordinators().size() != 1) {
-                log.error("Group coordinator lookup failed: Invalid response containing more than a single coordinator");
-                fatalError(new IllegalStateException("Group coordinator lookup failed: Invalid response containing more than a single coordinator"));
-            }
-            String key = batchFindCoordinator
-                    ? findCoordinatorResponse.data().coordinators().get(0).key()
-                    : builder.data().key();
-            Errors error = batchFindCoordinator
-                    ? Errors.forCode(findCoordinatorResponse.data().coordinators().get(0).errorCode())
-                    : findCoordinatorResponse.error();
             if (error == Errors.NONE) {
-                int nodeId = batchFindCoordinator
-                        ? findCoordinatorResponse.data().coordinators().get(0).nodeId()
-                        : findCoordinatorResponse.data().nodeId();
-                String host = batchFindCoordinator
-                        ? findCoordinatorResponse.data().coordinators().get(0).host()
-                        : findCoordinatorResponse.data().host();
-                int port = batchFindCoordinator
-                        ? findCoordinatorResponse.data().coordinators().get(0).port()
-                        : findCoordinatorResponse.data().port();
-                Node node = new Node(nodeId, host, port);
+                Node node = findCoordinatorResponse.node();
                 switch (coordinatorType) {
                     case GROUP:
                         consumerGroupCoordinator = node;
                         break;
                     case TRANSACTION:
                         transactionCoordinator = node;
-
                 }
                 result.done();
-                log.info("Discovered {} coordinator {}", coordinatorType.toString().toLowerCase(Locale.ROOT), node);
             } else if (error == Errors.COORDINATOR_NOT_AVAILABLE) {
                 reenqueue();
             } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
-            } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                abortableError(GroupAuthorizationException.forGroupId(key));
+            } else if (findCoordinatorResponse.error() == Errors.GROUP_AUTHORIZATION_FAILED) {
+                abortableError(new GroupAuthorizationException(builder.data().key()));
             } else {
-                String errorMessage = batchFindCoordinator
-                        ? findCoordinatorResponse.data().coordinators().get(0).errorMessage()
-                        : findCoordinatorResponse.data().errorMessage();
-                fatalError(new KafkaException(String.format("Could not find a coordinator with type %s with key %s due to " +
-                        "unexpected error: %s", coordinatorType, key,
-                        errorMessage)));
+                fatalError(new KafkaException(String.format("Could not find a coordinator with type %s with key %s due to" +
+                        "unexpected error: %s", coordinatorType, builder.data().key(),
+                        findCoordinatorResponse.data().errorMessage())));
             }
         }
     }
@@ -1588,7 +1315,7 @@ public class TransactionManager {
         private final EndTxnRequest.Builder builder;
 
         private EndTxnHandler(EndTxnRequest.Builder builder) {
-            super("EndTxn(" + builder.data.committed() + ")");
+            super("EndTxn(" + builder.result() + ")");
             this.builder = builder;
         }
 
@@ -1620,16 +1347,12 @@ public class TransactionManager {
                 reenqueue();
             } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS || error == Errors.CONCURRENT_TRANSACTIONS) {
                 reenqueue();
-            } else if (error == Errors.INVALID_PRODUCER_EPOCH || error == Errors.PRODUCER_FENCED) {
-                // We could still receive INVALID_PRODUCER_EPOCH from old versioned transaction coordinator,
-                // just treat it the same as PRODUCE_FENCED.
-                fatalError(Errors.PRODUCER_FENCED.exception());
+            } else if (error == Errors.INVALID_PRODUCER_EPOCH) {
+                fatalError(error.exception());
             } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
             } else if (error == Errors.INVALID_TXN_STATE) {
                 fatalError(error.exception());
-            } else if (error == Errors.UNKNOWN_PRODUCER_ID || error == Errors.INVALID_PRODUCER_ID_MAPPING) {
-                abortableErrorIfPossible(error.exception());
             } else {
                 fatalError(new KafkaException("Unhandled error in EndTxnResponse: " + error.message()));
             }
@@ -1639,15 +1362,12 @@ public class TransactionManager {
     private class AddOffsetsToTxnHandler extends TxnRequestHandler {
         private final AddOffsetsToTxnRequest.Builder builder;
         private final Map<TopicPartition, OffsetAndMetadata> offsets;
-        private final ConsumerGroupMetadata groupMetadata;
 
         private AddOffsetsToTxnHandler(AddOffsetsToTxnRequest.Builder builder,
-                                       Map<TopicPartition, OffsetAndMetadata> offsets,
-                                       ConsumerGroupMetadata groupMetadata) {
+                                       Map<TopicPartition, OffsetAndMetadata> offsets) {
             super("AddOffsetsToTxn");
             this.builder = builder;
             this.offsets = offsets;
-            this.groupMetadata = groupMetadata;
         }
 
         @Override
@@ -1663,30 +1383,25 @@ public class TransactionManager {
         @Override
         public void handleResponse(AbstractResponse response) {
             AddOffsetsToTxnResponse addOffsetsToTxnResponse = (AddOffsetsToTxnResponse) response;
-            Errors error = Errors.forCode(addOffsetsToTxnResponse.data().errorCode());
+            Errors error = addOffsetsToTxnResponse.error();
 
             if (error == Errors.NONE) {
-                log.debug("Successfully added partition for consumer group {} to transaction", builder.data.groupId());
+                log.debug("Successfully added partition for consumer group {} to transaction", builder.consumerGroupId());
 
                 // note the result is not completed until the TxnOffsetCommit returns
-                pendingRequests.add(txnOffsetCommitHandler(result, offsets, groupMetadata));
-
+                pendingRequests.add(txnOffsetCommitHandler(result, offsets, builder.consumerGroupId()));
                 transactionStarted = true;
             } else if (error == Errors.COORDINATOR_NOT_AVAILABLE || error == Errors.NOT_COORDINATOR) {
                 lookupCoordinator(FindCoordinatorRequest.CoordinatorType.TRANSACTION, transactionalId);
                 reenqueue();
             } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS || error == Errors.CONCURRENT_TRANSACTIONS) {
                 reenqueue();
-            } else if (error == Errors.UNKNOWN_PRODUCER_ID || error == Errors.INVALID_PRODUCER_ID_MAPPING) {
-                abortableErrorIfPossible(error.exception());
-            } else if (error == Errors.INVALID_PRODUCER_EPOCH || error == Errors.PRODUCER_FENCED) {
-                // We could still receive INVALID_PRODUCER_EPOCH from old versioned transaction coordinator,
-                // just treat it the same as PRODUCE_FENCED.
-                fatalError(Errors.PRODUCER_FENCED.exception());
+            } else if (error == Errors.INVALID_PRODUCER_EPOCH) {
+                fatalError(error.exception());
             } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
             } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                abortableError(GroupAuthorizationException.forGroupId(builder.data.groupId()));
+                abortableError(new GroupAuthorizationException(builder.consumerGroupId()));
             } else {
                 fatalError(new KafkaException("Unexpected error in AddOffsetsToTxnResponse: " + error.message()));
             }
@@ -1719,7 +1434,7 @@ public class TransactionManager {
 
         @Override
         String coordinatorKey() {
-            return builder.data.groupId();
+            return builder.consumerGroupId();
         }
 
         @Override
@@ -1728,7 +1443,7 @@ public class TransactionManager {
             boolean coordinatorReloaded = false;
             Map<TopicPartition, Errors> errors = txnOffsetCommitResponse.errors();
 
-            log.debug("Received TxnOffsetCommit response for consumer group {}: {}", builder.data.groupId(),
+            log.debug("Received TxnOffsetCommit response for consumer group {}: {}", builder.consumerGroupId(),
                     errors);
 
             for (Map.Entry<TopicPartition, Errors> entry : errors.entrySet()) {
@@ -1741,24 +1456,18 @@ public class TransactionManager {
                         || error == Errors.REQUEST_TIMED_OUT) {
                     if (!coordinatorReloaded) {
                         coordinatorReloaded = true;
-                        lookupCoordinator(FindCoordinatorRequest.CoordinatorType.GROUP, builder.data.groupId());
+                        lookupCoordinator(FindCoordinatorRequest.CoordinatorType.GROUP, builder.consumerGroupId());
                     }
                 } else if (error == Errors.UNKNOWN_TOPIC_OR_PARTITION
                         || error == Errors.COORDINATOR_LOAD_IN_PROGRESS) {
                     // If the topic is unknown or the coordinator is loading, retry with the current coordinator
                     continue;
                 } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                    abortableError(GroupAuthorizationException.forGroupId(builder.data.groupId()));
+                    abortableError(new GroupAuthorizationException(builder.consumerGroupId()));
                     break;
-                } else if (error == Errors.FENCED_INSTANCE_ID) {
-                    abortableError(error.exception());
-                    break;
-                } else if (error == Errors.UNKNOWN_MEMBER_ID
-                        || error == Errors.ILLEGAL_GENERATION) {
-                    abortableError(new CommitFailedException("Transaction offset Commit failed " +
-                        "due to consumer group metadata mismatch: " + error.exception().getMessage()));
-                    break;
-                } else if (isFatalException(error)) {
+                } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED
+                        || error == Errors.INVALID_PRODUCER_EPOCH
+                        || error == Errors.UNSUPPORTED_FOR_MESSAGE_FORMAT) {
                     fatalError(error.exception());
                     break;
                 } else {
@@ -1776,12 +1485,5 @@ public class TransactionManager {
                 reenqueue();
             }
         }
-    }
-
-    private boolean isFatalException(Errors error) {
-        return error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED
-                   || error == Errors.INVALID_PRODUCER_EPOCH
-                   || error == Errors.PRODUCER_FENCED
-                   || error == Errors.UNSUPPORTED_FOR_MESSAGE_FORMAT;
     }
 }

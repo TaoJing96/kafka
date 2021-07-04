@@ -17,24 +17,22 @@
 
 package kafka.server
 
-import java.util.{Arrays, Collections}
-
 import kafka.network.SocketServer
 import kafka.utils._
-import org.apache.kafka.common.Uuid
 import org.apache.kafka.common.message.DeleteTopicsRequestData
-import org.apache.kafka.common.message.DeleteTopicsRequestData.DeleteTopicState
-import org.apache.kafka.common.protocol.Errors
+import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.{DeleteTopicsRequest, DeleteTopicsResponse, MetadataRequest, MetadataResponse}
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
+import org.junit.Assert._
+import org.junit.Test
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
+import java.util.Collections
+import java.util.Arrays
 
 class DeleteTopicsRequestTest extends BaseRequestTest {
 
   @Test
-  def testValidDeleteTopicRequests(): Unit = {
+  def testValidDeleteTopicRequests() {
     val timeout = 10000
     // Single topic
     createTopic("topic-1", 1, 1)
@@ -49,39 +47,19 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
         new DeleteTopicsRequestData()
           .setTopicNames(Arrays.asList("topic-3", "topic-4"))
           .setTimeoutMs(timeout)).build())
-
-    // Topic Ids
-    createTopic("topic-7", 3, 2)
-    createTopic("topic-6", 1, 2)
-    val ids = getTopicIds()
-    validateValidDeleteTopicRequestsWithIds(new DeleteTopicsRequest.Builder(
-      new DeleteTopicsRequestData()
-        .setTopics(Arrays.asList(new DeleteTopicState().setTopicId(ids("topic-7")),
-             new DeleteTopicState().setTopicId(ids("topic-6"))
-        )
-      ).setTimeoutMs(timeout)).build())
   }
 
   private def validateValidDeleteTopicRequests(request: DeleteTopicsRequest): Unit = {
     val response = sendDeleteTopicsRequest(request)
     val error = response.errorCounts.asScala.find(_._1 != Errors.NONE)
-    assertTrue(error.isEmpty, s"There should be no errors, found ${response.data.responses.asScala}")
-    request.data.topicNames.forEach { topic =>
+    assertTrue(s"There should be no errors, found ${response.data.responses.asScala}", error.isEmpty)
+    request.data.topicNames.asScala.foreach { topic =>
       validateTopicIsDeleted(topic)
     }
   }
 
-  private def validateValidDeleteTopicRequestsWithIds(request: DeleteTopicsRequest): Unit = {
-    val response = sendDeleteTopicsRequest(request)
-    val error = response.errorCounts.asScala.find(_._1 != Errors.NONE)
-    assertTrue(error.isEmpty, s"There should be no errors, found ${response.data.responses.asScala}")
-    response.data.responses.forEach { response =>
-      validateTopicIsDeleted(response.name())
-    }
-  }
-
   @Test
-  def testErrorDeleteTopicRequests(): Unit = {
+  def testErrorDeleteTopicRequests() {
     val timeout = 30000
     val timeoutTopic = "invalid-timeout"
 
@@ -103,21 +81,6 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
         "partial-invalid-topic" -> Errors.UNKNOWN_TOPIC_OR_PARTITION
       )
     )
-    
-    // Topic IDs
-    createTopic("topic-id-1", 1, 1)
-    val validId = getTopicIds()("topic-id-1")
-    val invalidId = Uuid.randomUuid
-    validateErrorDeleteTopicRequestsWithIds(new DeleteTopicsRequest.Builder(
-      new DeleteTopicsRequestData()
-        .setTopics(Arrays.asList(new DeleteTopicState().setTopicId(invalidId), 
-            new DeleteTopicState().setTopicId(validId)))
-        .setTimeoutMs(timeout)).build(),
-      Map(
-        invalidId -> Errors.UNKNOWN_TOPIC_ID,
-        validId -> Errors.NONE
-      )
-    )
 
     // Timeout
     createTopic(timeoutTopic, 5, 2)
@@ -137,10 +100,10 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     val errors = response.data.responses
 
     val errorCount = response.errorCounts().asScala.foldLeft(0)(_+_._2)
-    assertEquals(expectedResponse.size, errorCount, "The response size should match")
+    assertEquals("The response size should match", expectedResponse.size, errorCount)
 
     expectedResponse.foreach { case (topic, expectedError) =>
-      assertEquals(expectedResponse(topic).code, errors.find(topic).errorCode, "The response error should match")
+      assertEquals("The response error should match", expectedResponse(topic).code, errors.find(topic).errorCode)
       // If no error validate the topic was deleted
       if (expectedError == Errors.NONE) {
         validateTopicIsDeleted(topic)
@@ -148,45 +111,32 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     }
   }
 
-  private def validateErrorDeleteTopicRequestsWithIds(request: DeleteTopicsRequest, expectedResponse: Map[Uuid, Errors]): Unit = {
-    val response = sendDeleteTopicsRequest(request)
-    val responses = response.data.responses
-    val errors = responses.asScala.map(result => result.topicId() -> result.errorCode()).toMap
-    val names = responses.asScala.map(result => result.topicId() -> result.name()).toMap
-
-    val errorCount = response.errorCounts().asScala.foldLeft(0)(_+_._2)
-    assertEquals(expectedResponse.size, errorCount, "The response size should match")
-
-    expectedResponse.foreach { case (topic, expectedError) =>
-      assertEquals(expectedResponse(topic).code, errors(topic), "The response error should match")
-      // If no error validate the topic was deleted
-      if (expectedError == Errors.NONE) {
-        validateTopicIsDeleted(names(topic))
-      }
-    }
-  }
-
   @Test
-  def testNotController(): Unit = {
+  def testNotController() {
     val request = new DeleteTopicsRequest.Builder(
         new DeleteTopicsRequestData()
           .setTopicNames(Collections.singletonList("not-controller"))
           .setTimeoutMs(1000)).build()
     val response = sendDeleteTopicsRequest(request, notControllerSocketServer)
 
-    val error = response.data.responses.find("not-controller").errorCode()
-    assertEquals(Errors.NOT_CONTROLLER.code,  error, "Expected controller error when routed incorrectly")
+    val error = response.data.responses().find("not-controller").errorCode()
+    assertEquals("Expected controller error when routed incorrectly",  Errors.NOT_CONTROLLER.code, error)
   }
 
   private def validateTopicIsDeleted(topic: String): Unit = {
-    val metadata = connectAndReceive[MetadataResponse](new MetadataRequest.Builder(
-      List(topic).asJava, true).build).topicMetadata.asScala
+    val metadata = sendMetadataRequest(new MetadataRequest.
+        Builder(List(topic).asJava, true).build).topicMetadata.asScala
     TestUtils.waitUntilTrue (() => !metadata.exists(p => p.topic.equals(topic) && p.error == Errors.NONE),
       s"The topic $topic should not exist")
   }
 
   private def sendDeleteTopicsRequest(request: DeleteTopicsRequest, socketServer: SocketServer = controllerSocketServer): DeleteTopicsResponse = {
-    connectAndReceive[DeleteTopicsResponse](request, destination = socketServer)
+    val response = connectAndSend(request, ApiKeys.DELETE_TOPICS, socketServer)
+    DeleteTopicsResponse.parse(response, request.version)
   }
 
+  private def sendMetadataRequest(request: MetadataRequest): MetadataResponse = {
+    val response = connectAndSend(request, ApiKeys.METADATA)
+    MetadataResponse.parse(response, request.version)
+  }
 }

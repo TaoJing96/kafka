@@ -19,7 +19,6 @@ package org.apache.kafka.common.protocol.types;
 import org.apache.kafka.common.protocol.types.Type.DocumentedType;
 
 import java.nio.ByteBuffer;
-import java.util.Optional;
 
 /**
  * Represents a type for an array of a particular type
@@ -92,9 +91,8 @@ public class ArrayOf extends DocumentedType {
         return size;
     }
 
-    @Override
-    public Optional<Type> arrayElementType() {
-        return Optional.of(type);
+    public Type type() {
+        return type;
     }
 
     @Override

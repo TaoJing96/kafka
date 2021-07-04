@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.common.security.auth;
 
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.Assert;
+import org.junit.Test;
 
 public class KafkaPrincipalTest {
 
@@ -28,7 +27,7 @@ public class KafkaPrincipalTest {
         KafkaPrincipal principal1 = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, name);
         KafkaPrincipal principal2 = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, name);
 
-        assertEquals(principal1.hashCode(), principal2.hashCode());
-        assertEquals(principal1, principal2);
+        Assert.assertEquals(principal1.hashCode(), principal2.hashCode());
+        Assert.assertEquals(principal1, principal2);
     }
 }

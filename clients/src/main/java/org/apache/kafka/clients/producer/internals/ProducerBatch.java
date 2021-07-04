@@ -31,7 +31,6 @@ import org.apache.kafka.common.record.Record;
 import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.requests.ProduceResponse;
-import org.apache.kafka.common.utils.ProducerIdAndEpoch;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,10 +41,8 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 
 import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V2;
 import static org.apache.kafka.common.record.RecordBatch.NO_TIMESTAMP;
@@ -106,12 +103,12 @@ public final class ProducerBatch {
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
             return null;
         } else {
-            this.recordsBuilder.append(timestamp, key, value, headers);
+            Long checksum = this.recordsBuilder.append(timestamp, key, value, headers);
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
             this.lastAppendTime = now;
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
-                                                                   timestamp,
+                                                                   timestamp, checksum,
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length,
                                                                    Time.SYSTEM);
@@ -136,7 +133,7 @@ public final class ProducerBatch {
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
-                                                                   timestamp,
+                                                                   timestamp, thunk.future.checksumOrNull(),
                                                                    key == null ? -1 : key.remaining(),
                                                                    value == null ? -1 : value.remaining(),
                                                                    Time.SYSTEM);
@@ -158,44 +155,14 @@ public final class ProducerBatch {
             throw new IllegalStateException("Batch has already been completed in final state " + finalState.get());
 
         log.trace("Aborting batch for partition {}", topicPartition, exception);
-        completeFutureAndFireCallbacks(ProduceResponse.INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, index -> exception);
+        completeFutureAndFireCallbacks(ProduceResponse.INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, exception);
     }
 
     /**
-     * Check if the batch has been completed (either successfully or exceptionally).
-     * @return `true` if the batch has been completed, `false` otherwise.
+     * Return `true` if {@link #done(long, long, RuntimeException)} has been invoked at least once, `false` otherwise.
      */
     public boolean isDone() {
         return finalState() != null;
-    }
-
-    /**
-     * Complete the batch successfully.
-     * @param baseOffset The base offset of the messages assigned by the server
-     * @param logAppendTime The log append time or -1 if CreateTime is being used
-     * @return true if the batch was completed as a result of this call, and false
-     *   if it had been completed previously
-     */
-    public boolean complete(long baseOffset, long logAppendTime) {
-        return done(baseOffset, logAppendTime, null, null);
-    }
-
-    /**
-     * Complete the batch exceptionally. The provided top-level exception will be used
-     * for each record future contained in the batch.
-     *
-     * @param topLevelException top-level partition error
-     * @param recordExceptions Record exception function mapping batchIndex to the respective record exception
-     * @return true if the batch was completed as a result of this call, and false
-     *   if it had been completed previously
-     */
-    public boolean completeExceptionally(
-        RuntimeException topLevelException,
-        Function<Integer, RuntimeException> recordExceptions
-    ) {
-        Objects.requireNonNull(topLevelException);
-        Objects.requireNonNull(recordExceptions);
-        return done(ProduceResponse.INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, topLevelException, recordExceptions);
     }
 
     /**
@@ -213,25 +180,20 @@ public final class ProducerBatch {
      *
      * @param baseOffset The base offset of the messages assigned by the server
      * @param logAppendTime The log append time or -1 if CreateTime is being used
-     * @param topLevelException The exception that occurred (or null if the request was successful)
-     * @param recordExceptions Record exception function mapping batchIndex to the respective record exception
+     * @param exception The exception that occurred (or null if the request was successful)
      * @return true if the batch was completed successfully and false if the batch was previously aborted
      */
-    private boolean done(
-        long baseOffset,
-        long logAppendTime,
-        RuntimeException topLevelException,
-        Function<Integer, RuntimeException> recordExceptions
-    ) {
-        final FinalState tryFinalState = (topLevelException == null) ? FinalState.SUCCEEDED : FinalState.FAILED;
+    public boolean done(long baseOffset, long logAppendTime, RuntimeException exception) {
+        final FinalState tryFinalState = (exception == null) ? FinalState.SUCCEEDED : FinalState.FAILED;
+
         if (tryFinalState == FinalState.SUCCEEDED) {
             log.trace("Successfully produced messages to {} with base offset {}.", topicPartition, baseOffset);
         } else {
-            log.trace("Failed to produce messages to {} with base offset {}.", topicPartition, baseOffset, topLevelException);
+            log.trace("Failed to produce messages to {} with base offset {}.", topicPartition, baseOffset, exception);
         }
 
         if (this.finalState.compareAndSet(null, tryFinalState)) {
-            completeFutureAndFireCallbacks(baseOffset, logAppendTime, recordExceptions);
+            completeFutureAndFireCallbacks(baseOffset, logAppendTime, exception);
             return true;
         }
 
@@ -252,26 +214,20 @@ public final class ProducerBatch {
         return false;
     }
 
-    private void completeFutureAndFireCallbacks(
-        long baseOffset,
-        long logAppendTime,
-        Function<Integer, RuntimeException> recordExceptions
-    ) {
+    private void completeFutureAndFireCallbacks(long baseOffset, long logAppendTime, RuntimeException exception) {
         // Set the future before invoking the callbacks as we rely on its state for the `onCompletion` call
-        produceFuture.set(baseOffset, logAppendTime, recordExceptions);
+        produceFuture.set(baseOffset, logAppendTime, exception);
 
         // execute callbacks
-        for (int i = 0; i < thunks.size(); i++) {
+        for (Thunk thunk : thunks) {
             try {
-                Thunk thunk = thunks.get(i);
-                if (thunk.callback != null) {
-                    if (recordExceptions == null) {
-                        RecordMetadata metadata = thunk.future.value();
+                if (exception == null) {
+                    RecordMetadata metadata = thunk.future.value();
+                    if (thunk.callback != null)
                         thunk.callback.onCompletion(metadata, null);
-                    } else {
-                        RuntimeException exception = recordExceptions.apply(i);
+                } else {
+                    if (thunk.callback != null)
                         thunk.callback.onCompletion(null, exception);
-                    }
                 }
             } catch (Exception e) {
                 log.error("Error executing user-provided callback on message for topic-partition '{}'", topicPartition, e);
@@ -311,19 +267,16 @@ public final class ProducerBatch {
             // A newly created batch can always host the first message.
             if (!batch.tryAppendForSplit(record.timestamp(), record.key(), record.value(), record.headers(), thunk)) {
                 batches.add(batch);
-                batch.closeForRecordAppends();
                 batch = createBatchOffAccumulatorForRecord(record, splitBatchSize);
                 batch.tryAppendForSplit(record.timestamp(), record.key(), record.value(), record.headers(), thunk);
             }
         }
 
         // Close the last batch and add it to the batch list after split.
-        if (batch != null) {
+        if (batch != null)
             batches.add(batch);
-            batch.closeForRecordAppends();
-        }
 
-        produceFuture.set(ProduceResponse.INVALID_OFFSET, NO_TIMESTAMP, index -> new RecordBatchTooLargeException());
+        produceFuture.set(ProduceResponse.INVALID_OFFSET, NO_TIMESTAMP, new RecordBatchTooLargeException());
         produceFuture.done();
 
         if (hasSequence()) {
@@ -435,8 +388,6 @@ public final class ProducerBatch {
     }
 
     public void resetProducerState(ProducerIdAndEpoch producerIdAndEpoch, int baseSequence, boolean isTransactional) {
-        log.info("Resetting sequence number of batch with current sequence {} for partition {} to {}",
-                this.baseSequence(), this.topicPartition, baseSequence);
         reopened = true;
         recordsBuilder.reopenAndRewriteProducerState(producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, baseSequence, isTransactional);
     }
@@ -463,8 +414,8 @@ public final class ProducerBatch {
      * Abort the record builder and reset the state of the underlying buffer. This is used prior to aborting
      * the batch with {@link #abort(RuntimeException)} and ensures that no record previously appended can be
      * read. This is used in scenarios where we want to ensure a batch ultimately gets aborted, but in which
-     * it is not safe to invoke the completion callbacks (e.g. because we are holding a lock, such as
-     * when aborting batches in {@link RecordAccumulator}).
+     * it is not safe to invoke the completion callbacks (e.g. because we are holding a lock,
+     * {@link RecordAccumulator#abortBatches()}).
      */
     public void abortRecordAppends() {
         recordsBuilder.abort();
@@ -500,10 +451,6 @@ public final class ProducerBatch {
 
     public int baseSequence() {
         return recordsBuilder.baseSequence();
-    }
-
-    public int lastSequence() {
-        return recordsBuilder.baseSequence() + recordsBuilder.numRecords() - 1;
     }
 
     public boolean hasSequence() {

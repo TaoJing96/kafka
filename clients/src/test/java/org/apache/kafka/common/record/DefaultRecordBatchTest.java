@@ -16,25 +16,21 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.InvalidRecordException;
-import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
-import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.CloseableIterator;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.test.TestUtils;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.kafka.common.record.DefaultRecordBatch.RECORDS_COUNT_OFFSET;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class DefaultRecordBatchTest {
 
@@ -94,7 +90,9 @@ public class DefaultRecordBatchTest {
             assertEquals(RecordBatch.NO_SEQUENCE, batch.baseSequence());
             assertEquals(RecordBatch.NO_SEQUENCE, batch.lastSequence());
 
-            for (Record record : batch) record.ensureValid();
+            for (Record record : batch) {
+                assertTrue(record.isValid());
+            }
         }
     }
 
@@ -122,7 +120,9 @@ public class DefaultRecordBatchTest {
             assertEquals(baseSequence, batch.baseSequence());
             assertEquals(baseSequence + 1, batch.lastSequence());
 
-            for (Record record : batch) record.ensureValid();
+            for (Record record : batch) {
+                assertTrue(record.isValid());
+            }
         }
     }
 
@@ -173,7 +173,7 @@ public class DefaultRecordBatchTest {
         assertEquals(actualSize, DefaultRecordBatch.sizeInBytes(Arrays.asList(records)));
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidRecordSize() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V2, 0L,
                 CompressionType.NONE, TimestampType.CREATE_TIME,
@@ -186,46 +186,54 @@ public class DefaultRecordBatchTest {
 
         DefaultRecordBatch batch = new DefaultRecordBatch(buffer);
         assertFalse(batch.isValid());
-        assertThrows(CorruptRecordException.class, batch::ensureValid);
+        batch.ensureValid();
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidRecordCountTooManyNonCompressedV2() {
         long now = System.currentTimeMillis();
         DefaultRecordBatch batch = recordsWithInvalidRecordCount(RecordBatch.MAGIC_VALUE_V2, now, CompressionType.NONE, 5);
         // force iteration through the batch to execute validation
         // batch validation is a part of normal workflow for LogValidator.validateMessagesAndAssignOffsets
-        assertThrows(InvalidRecordException.class, () -> batch.forEach(Record::ensureValid));
+        for (Record record: batch) {
+            record.isValid();
+        }
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidRecordCountTooLittleNonCompressedV2() {
         long now = System.currentTimeMillis();
         DefaultRecordBatch batch = recordsWithInvalidRecordCount(RecordBatch.MAGIC_VALUE_V2, now, CompressionType.NONE, 2);
         // force iteration through the batch to execute validation
         // batch validation is a part of normal workflow for LogValidator.validateMessagesAndAssignOffsets
-        assertThrows(InvalidRecordException.class, () -> batch.forEach(Record::ensureValid));
+        for (Record record: batch) {
+            record.isValid();
+        }
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidRecordCountTooManyCompressedV2() {
         long now = System.currentTimeMillis();
         DefaultRecordBatch batch = recordsWithInvalidRecordCount(RecordBatch.MAGIC_VALUE_V2, now, CompressionType.GZIP, 5);
         // force iteration through the batch to execute validation
         // batch validation is a part of normal workflow for LogValidator.validateMessagesAndAssignOffsets
-        assertThrows(InvalidRecordException.class, () -> batch.forEach(Record::ensureValid));
+        for (Record record: batch) {
+            record.isValid();
+        }
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidRecordCountTooLittleCompressedV2() {
         long now = System.currentTimeMillis();
         DefaultRecordBatch batch = recordsWithInvalidRecordCount(RecordBatch.MAGIC_VALUE_V2, now, CompressionType.GZIP, 2);
         // force iteration through the batch to execute validation
         // batch validation is a part of normal workflow for LogValidator.validateMessagesAndAssignOffsets
-        assertThrows(InvalidRecordException.class, () -> batch.forEach(Record::ensureValid));
+        for (Record record: batch) {
+            record.isValid();
+        }
     }
 
-    @Test
+    @Test(expected = InvalidRecordException.class)
     public void testInvalidCrc() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V2, 0L,
                 CompressionType.NONE, TimestampType.CREATE_TIME,
@@ -238,7 +246,7 @@ public class DefaultRecordBatchTest {
 
         DefaultRecordBatch batch = new DefaultRecordBatch(buffer);
         assertFalse(batch.isValid());
-        assertThrows(CorruptRecordException.class, batch::ensureValid);
+        batch.ensureValid();
     }
 
     @Test
@@ -314,7 +322,7 @@ public class DefaultRecordBatchTest {
             assertEquals(logAppendTime, record.timestamp());
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testSetNoTimestampTypeNotAllowed() {
         MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V2, 0L,
                 CompressionType.NONE, TimestampType.CREATE_TIME,
@@ -322,7 +330,7 @@ public class DefaultRecordBatchTest {
                 new SimpleRecord(2L, "b".getBytes(), "2".getBytes()),
                 new SimpleRecord(3L, "c".getBytes(), "3".getBytes()));
         DefaultRecordBatch batch = new DefaultRecordBatch(records.buffer());
-        assertThrows(IllegalArgumentException.class, () -> batch.setMaxTimestamp(TimestampType.NO_TIMESTAMP_TYPE, RecordBatch.NO_TIMESTAMP));
+        batch.setMaxTimestamp(TimestampType.NO_TIMESTAMP_TYPE, RecordBatch.NO_TIMESTAMP);
     }
 
     @Test
@@ -364,32 +372,6 @@ public class DefaultRecordBatchTest {
         DefaultRecordBatch batch = new DefaultRecordBatch(records.buffer());
         try (CloseableIterator<Record> streamingIterator = batch.streamingIterator(BufferSupplier.create())) {
             TestUtils.checkEquals(streamingIterator, batch.iterator());
-        }
-    }
-
-    @Test
-    public void testSkipKeyValueIteratorCorrectness() {
-        Header[] headers = {new RecordHeader("k1", "v1".getBytes()), new RecordHeader("k2", "v2".getBytes())};
-
-        MemoryRecords records = MemoryRecords.withRecords(RecordBatch.MAGIC_VALUE_V2, 0L,
-            CompressionType.LZ4, TimestampType.CREATE_TIME,
-            new SimpleRecord(1L, "a".getBytes(), "1".getBytes()),
-            new SimpleRecord(2L, "b".getBytes(), "2".getBytes()),
-            new SimpleRecord(3L, "c".getBytes(), "3".getBytes()),
-            new SimpleRecord(1000L, "abc".getBytes(), "0".getBytes()),
-            new SimpleRecord(9999L, "abc".getBytes(), "0".getBytes(), headers)
-            );
-        DefaultRecordBatch batch = new DefaultRecordBatch(records.buffer());
-        try (CloseableIterator<Record> streamingIterator = batch.skipKeyValueIterator(BufferSupplier.NO_CACHING)) {
-            assertEquals(Arrays.asList(
-                new PartialDefaultRecord(9, (byte) 0, 0L, 1L, -1, 1, 1),
-                new PartialDefaultRecord(9, (byte) 0, 1L, 2L, -1, 1, 1),
-                new PartialDefaultRecord(9, (byte) 0, 2L, 3L, -1, 1, 1),
-                new PartialDefaultRecord(12, (byte) 0, 3L, 1000L, -1, 3, 1),
-                new PartialDefaultRecord(25, (byte) 0, 4L, 9999L, -1, 3, 1)
-                ),
-                Utils.toList(streamingIterator)
-            );
         }
     }
 

@@ -17,11 +17,11 @@
 
 package org.apache.kafka.common.config;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.Assert.assertEquals;
 
 public class ConfigResourceTest {
     @Test
@@ -40,6 +40,6 @@ public class ConfigResourceTest {
     @Test
     public void shouldRoundTripEveryType() {
         Arrays.stream(ConfigResource.Type.values()).forEach(type ->
-            assertEquals(type, ConfigResource.Type.forId(type.id()), type.toString()));
+            assertEquals(type.toString(), type, ConfigResource.Type.forId(type.id())));
     }
 }

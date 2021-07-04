@@ -17,14 +17,12 @@
 package org.apache.kafka.connect.integration;
 
 import org.apache.kafka.connect.errors.DataException;
-import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 /**
@@ -39,34 +37,22 @@ public class TaskHandle {
     private final ConnectorHandle connectorHandle;
     private final AtomicInteger partitionsAssigned = new AtomicInteger(0);
     private final StartAndStopCounter startAndStopCounter = new StartAndStopCounter();
-    private final Consumer<SinkRecord> consumer;
 
     private CountDownLatch recordsRemainingLatch;
     private CountDownLatch recordsToCommitLatch;
     private int expectedRecords = -1;
     private int expectedCommits = -1;
 
-    public TaskHandle(ConnectorHandle connectorHandle, String taskId, Consumer<SinkRecord> consumer) {
+    public TaskHandle(ConnectorHandle connectorHandle, String taskId) {
+        log.info("Created task {} for connector {}", taskId, connectorHandle);
         this.taskId = taskId;
         this.connectorHandle = connectorHandle;
-        this.consumer = consumer;
-    }
-
-    public String taskId() {
-        return taskId;
-    }
-
-    public void record() {
-        record(null);
     }
 
     /**
      * Record a message arrival at the task and the connector overall.
      */
-    public void record(SinkRecord record) {
-        if (consumer != null && record != null) {
-            consumer.accept(record);
-        }
+    public void record() {
         if (recordsRemainingLatch != null) {
             recordsRemainingLatch.countDown();
         }
@@ -213,15 +199,6 @@ public class TaskHandle {
         }
         log.debug("Task {} saw {} records, expected {} records",
                   taskId, expectedCommits - recordsToCommitLatch.getCount(), expectedCommits);
-    }
-
-    /**
-     * Gets the start and stop counter corresponding to this handle.
-     *
-     * @return the start and stop counter
-     */
-    public StartAndStopCounter startAndStopCounter() {
-        return startAndStopCounter;
     }
 
     /**

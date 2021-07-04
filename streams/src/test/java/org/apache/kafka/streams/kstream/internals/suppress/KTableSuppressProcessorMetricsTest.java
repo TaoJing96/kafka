@@ -18,29 +18,22 @@ package org.apache.kafka.streams.kstream.internals.suppress;
 
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
-import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.utils.SystemTime;
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Suppressed;
 import org.apache.kafka.streams.kstream.internals.Change;
+import org.apache.kafka.streams.kstream.internals.FullChangeSerde;
 import org.apache.kafka.streams.kstream.internals.KTableImpl;
+import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.processor.StateStoreContext;
-import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 import org.apache.kafka.streams.state.internals.InMemoryTimeOrderedKeyValueBuffer;
 import org.apache.kafka.test.MockInternalProcessorContext;
-import org.apache.kafka.test.StreamsTestUtils;
-import org.apache.kafka.test.TestUtils;
 import org.easymock.EasyMock;
 import org.hamcrest.Matcher;
 import org.junit.Test;
 
 import java.time.Duration;
 import java.util.Map;
-import java.util.Properties;
 
 import static org.apache.kafka.common.utils.Utils.mkEntry;
 import static org.apache.kafka.common.utils.Utils.mkMap;
@@ -49,144 +42,155 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.core.Is.is;
 
-@SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
 public class KTableSuppressProcessorMetricsTest {
     private static final long ARBITRARY_LONG = 5L;
-    private static final TaskId TASK_ID = new TaskId(0, 0);
-    private final Properties streamsConfig = StreamsTestUtils.getStreamsConfig();
-    private final String threadId = Thread.currentThread().getName();
 
-    private final MetricName evictionTotalMetricLatest = new MetricName(
+    private static final MetricName EVICTION_TOTAL_METRIC = new MetricName(
         "suppression-emit-total",
         "stream-processor-node-metrics",
-        "The total number of emitted records from the suppression buffer",
+        "The total number of occurrence of suppression-emit operations.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
             mkEntry("processor-node-id", "testNode")
         )
     );
 
-    private final MetricName evictionRateMetricLatest = new MetricName(
+    private static final MetricName EVICTION_RATE_METRIC = new MetricName(
         "suppression-emit-rate",
         "stream-processor-node-metrics",
-        "The average number of emitted records from the suppression buffer per second",
+        "The average number of occurrence of suppression-emit operation per second.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
             mkEntry("processor-node-id", "testNode")
         )
     );
 
-    private final MetricName bufferSizeAvgMetricLatest = new MetricName(
+    private static final MetricName BUFFER_SIZE_AVG_METRIC = new MetricName(
         "suppression-buffer-size-avg",
-        "stream-state-metrics",
-        "The average size of buffered records",
+        "stream-buffer-metrics",
+        "The average size of buffered records.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
-            mkEntry("in-memory-suppression-state-id", "test-store")
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
         )
     );
 
-    private final MetricName bufferSizeMaxMetricLatest = new MetricName(
+    private static final MetricName BUFFER_SIZE_CURRENT_METRIC = new MetricName(
+        "suppression-buffer-size-current",
+        "stream-buffer-metrics",
+        "The current size of buffered records.",
+        mkMap(
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
+        )
+    );
+
+    private static final MetricName BUFFER_SIZE_MAX_METRIC = new MetricName(
         "suppression-buffer-size-max",
-        "stream-state-metrics",
-        "The maximum size of buffered records",
+        "stream-buffer-metrics",
+        "The max size of buffered records.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
-            mkEntry("in-memory-suppression-state-id", "test-store")
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
         )
     );
 
-    private final MetricName bufferCountAvgMetricLatest = new MetricName(
+    private static final MetricName BUFFER_COUNT_AVG_METRIC = new MetricName(
         "suppression-buffer-count-avg",
-        "stream-state-metrics",
-        "The average count of buffered records",
+        "stream-buffer-metrics",
+        "The average count of buffered records.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
-            mkEntry("in-memory-suppression-state-id", "test-store")
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
         )
     );
 
-    private final MetricName bufferCountMaxMetricLatest = new MetricName(
-        "suppression-buffer-count-max",
-        "stream-state-metrics",
-        "The maximum count of buffered records",
+    private static final MetricName BUFFER_COUNT_CURRENT_METRIC = new MetricName(
+        "suppression-buffer-count-current",
+        "stream-buffer-metrics",
+        "The current count of buffered records.",
         mkMap(
-            mkEntry("thread-id", threadId),
-            mkEntry("task-id", TASK_ID.toString()),
-            mkEntry("in-memory-suppression-state-id", "test-store")
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
+        )
+    );
+
+    private static final MetricName BUFFER_COUNT_MAX_METRIC = new MetricName(
+        "suppression-buffer-count-max",
+        "stream-buffer-metrics",
+        "The max count of buffered records.",
+        mkMap(
+            mkEntry("client-id", "mock-processor-context-virtual-thread"),
+            mkEntry("task-id", "0_0"),
+            mkEntry("buffer-id", "test-store")
         )
     );
 
     @Test
-    public void shouldRecordMetricsWithBuiltInMetricsVersionLatest() {
+    public void shouldRecordMetrics() {
         final String storeName = "test-store";
 
         final StateStore buffer = new InMemoryTimeOrderedKeyValueBuffer.Builder<>(
             storeName, Serdes.String(),
-            Serdes.Long()
+            FullChangeSerde.castOrWrap(Serdes.Long())
         )
             .withLoggingDisabled()
             .build();
 
         final KTableImpl<String, ?, Long> mock = EasyMock.mock(KTableImpl.class);
-        final org.apache.kafka.streams.processor.Processor<String, Change<Long>> processor =
+        final Processor<String, Change<Long>> processor =
             new KTableSuppressProcessorSupplier<>(
                 (SuppressedInternal<String>) Suppressed.<String>untilTimeLimit(Duration.ofDays(100), maxRecords(1)),
                 storeName,
                 mock
             ).get();
 
-        streamsConfig.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, StreamsConfig.METRICS_LATEST);
-        final MockInternalProcessorContext context =
-            new MockInternalProcessorContext(streamsConfig, TASK_ID, TestUtils.tempDirectory());
-        final Time time = new SystemTime();
+        final MockInternalProcessorContext context = new MockInternalProcessorContext();
         context.setCurrentNode(new ProcessorNode("testNode"));
-        context.setSystemTimeMs(time.milliseconds());
 
-        buffer.init((StateStoreContext) context, buffer);
+        buffer.init(context, buffer);
         processor.init(context);
 
         final long timestamp = 100L;
-        context.setRecordMetadata("", 0, 0L, new RecordHeaders(), timestamp);
+        context.setRecordMetadata("", 0, 0L, null, timestamp);
         final String key = "longKey";
         final Change<Long> value = new Change<>(null, ARBITRARY_LONG);
         processor.process(key, value);
 
-        final MetricName evictionRateMetric = evictionRateMetricLatest;
-        final MetricName evictionTotalMetric = evictionTotalMetricLatest;
-        final MetricName bufferSizeAvgMetric = bufferSizeAvgMetricLatest;
-        final MetricName bufferSizeMaxMetric = bufferSizeMaxMetricLatest;
-        final MetricName bufferCountAvgMetric = bufferCountAvgMetricLatest;
-        final MetricName bufferCountMaxMetric = bufferCountMaxMetricLatest;
-
         {
             final Map<MetricName, ? extends Metric> metrics = context.metrics().metrics();
 
-            verifyMetric(metrics, evictionRateMetric, is(0.0));
-            verifyMetric(metrics, evictionTotalMetric, is(0.0));
-            verifyMetric(metrics, bufferSizeAvgMetric, is(21.5));
-            verifyMetric(metrics, bufferSizeMaxMetric, is(43.0));
-            verifyMetric(metrics, bufferCountAvgMetric, is(0.5));
-            verifyMetric(metrics, bufferCountMaxMetric, is(1.0));
+            verifyMetric(metrics, EVICTION_RATE_METRIC, is(0.0));
+            verifyMetric(metrics, EVICTION_TOTAL_METRIC, is(0.0));
+            verifyMetric(metrics, BUFFER_SIZE_AVG_METRIC, is(29.5));
+            verifyMetric(metrics, BUFFER_SIZE_CURRENT_METRIC, is(59.0));
+            verifyMetric(metrics, BUFFER_SIZE_MAX_METRIC, is(59.0));
+            verifyMetric(metrics, BUFFER_COUNT_AVG_METRIC, is(0.5));
+            verifyMetric(metrics, BUFFER_COUNT_CURRENT_METRIC, is(1.0));
+            verifyMetric(metrics, BUFFER_COUNT_MAX_METRIC, is(1.0));
         }
 
-        context.setRecordMetadata("", 0, 1L, new RecordHeaders(), timestamp + 1);
+        context.setRecordMetadata("", 0, 1L, null, timestamp + 1);
         processor.process("key", value);
 
         {
             final Map<MetricName, ? extends Metric> metrics = context.metrics().metrics();
 
-            verifyMetric(metrics, evictionRateMetric, greaterThan(0.0));
-            verifyMetric(metrics, evictionTotalMetric, is(1.0));
-            verifyMetric(metrics, bufferSizeAvgMetric, is(41.0));
-            verifyMetric(metrics, bufferSizeMaxMetric, is(82.0));
-            verifyMetric(metrics, bufferCountAvgMetric, is(1.0));
-            verifyMetric(metrics, bufferCountMaxMetric, is(2.0));
+            verifyMetric(metrics, EVICTION_RATE_METRIC, greaterThan(0.0));
+            verifyMetric(metrics, EVICTION_TOTAL_METRIC, is(1.0));
+            verifyMetric(metrics, BUFFER_SIZE_AVG_METRIC, is(57.0));
+            verifyMetric(metrics, BUFFER_SIZE_CURRENT_METRIC, is(55.0));
+            verifyMetric(metrics, BUFFER_SIZE_MAX_METRIC, is(114.0));
+            verifyMetric(metrics, BUFFER_COUNT_AVG_METRIC, is(1.0));
+            verifyMetric(metrics, BUFFER_COUNT_CURRENT_METRIC, is(1.0));
+            verifyMetric(metrics, BUFFER_COUNT_MAX_METRIC, is(2.0));
         }
     }
 
@@ -196,5 +200,6 @@ public class KTableSuppressProcessorMetricsTest {
                                          final Matcher<T> matcher) {
         assertThat(metrics.get(metricName).metricName().description(), is(metricName.description()));
         assertThat((T) metrics.get(metricName).metricValue(), matcher);
+
     }
 }

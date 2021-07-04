@@ -22,38 +22,37 @@ import java.nio.charset.StandardCharsets
 import kafka.admin.ZkSecurityMigrator
 import kafka.utils.{Logging, TestUtils}
 import kafka.zk._
-import org.apache.kafka.common.{KafkaException, TopicPartition, Uuid}
+import org.apache.kafka.common.{KafkaException, TopicPartition}
 import org.apache.kafka.common.security.JaasUtils
 import org.apache.zookeeper.data.{ACL, Stat}
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.junit.Assert._
+import org.junit.{After, Before, Test}
 
 import scala.util.{Failure, Success, Try}
 import javax.security.auth.login.Configuration
 import kafka.api.ApiVersion
 import kafka.cluster.{Broker, EndPoint}
-import kafka.controller.ReplicaAssignment
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Time
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.Seq
 
 class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
   val jaasFile = kafka.utils.JaasTestUtils.writeJaasContextsToFile(kafka.utils.JaasTestUtils.zkSections)
   val authProvider = "zookeeper.authProvider.1"
 
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     System.setProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM, jaasFile.getAbsolutePath)
     Configuration.setConfiguration(null)
     System.setProperty(authProvider, "org.apache.zookeeper.server.auth.SASLAuthenticationProvider")
     super.setUp()
   }
 
-  @AfterEach
-  override def tearDown(): Unit = {
+  @After
+  override def tearDown() {
     super.tearDown()
     System.clearProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM)
     System.clearProperty(authProvider)
@@ -66,13 +65,18 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
    */
   @Test
   def testIsZkSecurityEnabled(): Unit = {
-    assertTrue(JaasUtils.isZkSaslEnabled())
+    assertTrue(JaasUtils.isZkSecurityEnabled())
     Configuration.setConfiguration(null)
     System.clearProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM)
-    assertFalse(JaasUtils.isZkSaslEnabled())
-    Configuration.setConfiguration(null)
-    System.setProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM, "no-such-file-exists.conf")
-    assertThrows(classOf[KafkaException], () => JaasUtils.isZkSaslEnabled())
+    assertFalse(JaasUtils.isZkSecurityEnabled())
+    try {
+      Configuration.setConfiguration(null)
+      System.setProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM, "no-such-file-exists.conf")
+      JaasUtils.isZkSecurityEnabled()
+      fail("Should have thrown an exception")
+    } catch {
+      case _: KafkaException => // Expected
+    }
   }
 
   /**
@@ -87,12 +91,12 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
       zkClient.makeSurePersistentPathExists(path)
       if (ZkData.sensitivePath(path)) {
         val aclList = zkClient.getAcl(path)
-        assertEquals(1, aclList.size, s"Unexpected acl list size for $path")
+        assertEquals(s"Unexpected acl list size for $path", 1, aclList.size)
         for (acl <- aclList)
           assertTrue(TestUtils.isAclSecure(acl, sensitive = true))
       } else if (!path.equals(ConsumerPathZNode.path)) {
         val aclList = zkClient.getAcl(path)
-        assertEquals(2, aclList.size, s"Unexpected acl list size for $path")
+        assertEquals(s"Unexpected acl list size for $path", 2, aclList.size)
         for (acl <- aclList)
           assertTrue(TestUtils.isAclSecure(acl, sensitive = false))
       }
@@ -105,7 +109,6 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
 
     // Test that creates persistent nodes
     val topic1 = "topic1"
-    val topicId = Some(Uuid.randomUuid())
     val assignment = Map(
       new TopicPartition(topic1, 0) -> Seq(0, 1),
       new TopicPartition(topic1, 1) -> Seq(0, 1),
@@ -113,7 +116,7 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
     )
 
     // create a topic assignment
-    zkClient.createTopicAssignment(topic1, topicId, assignment)
+    zkClient.createTopicAssignment(topic1, assignment)
     verify(TopicZNode.path(topic1))
 
     // Test that can create: createSequentialPersistentPath
@@ -127,8 +130,7 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
 
     // Test that can update persistent nodes
     val updatedAssignment = assignment - new TopicPartition(topic1, 2)
-    zkClient.setTopicAssignment(topic1, topicId,
-      updatedAssignment.map { case (k, v) => k -> ReplicaAssignment(v, List(), List()) })
+    zkClient.setTopicAssignment(topic1, updatedAssignment)
     assertEquals(updatedAssignment.size, zkClient.getTopicPartitionCount(topic1).get)
   }
 
@@ -238,17 +240,17 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
     for (path <- ZkData.SecureRootPaths ++ ZkData.SensitiveRootPaths) {
       val sensitive = ZkData.sensitivePath(path)
       val listParent = secondZk.getAcl(path)
-      assertTrue(isAclCorrect(listParent, secondZk.secure, sensitive), path)
+      assertTrue(path, isAclCorrect(listParent, secondZk.secure, sensitive))
 
       val childPath = path + "/fpjwashere"
       val listChild = secondZk.getAcl(childPath)
-      assertTrue(isAclCorrect(listChild, secondZk.secure, sensitive), childPath)
+      assertTrue(childPath, isAclCorrect(listChild, secondZk.secure, sensitive))
     }
     // Check consumers path.
     val consumersAcl = firstZk.getAcl(ConsumerPathZNode.path)
-    assertTrue(isAclCorrect(consumersAcl, false, false), ConsumerPathZNode.path)
-    assertTrue(isAclCorrect(firstZk.getAcl("/kafka-acl-extended"), secondZk.secure,
-      ZkData.sensitivePath(ExtendedAclZNode.path)), "/kafka-acl-extended")
+    assertTrue(ConsumerPathZNode.path, isAclCorrect(consumersAcl, false, false))
+    assertTrue("/kafka-acl-extended", isAclCorrect(firstZk.getAcl("/kafka-acl-extended"), secondZk.secure,
+      ZkData.sensitivePath(ExtendedAclZNode.path)))
   }
 
   /**
@@ -332,6 +334,6 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
     zkClient.makeSurePersistentPathExists(ConsumerPathZNode.path)
 
     val consumerPathAcls = zkClient.currentZooKeeper.getACL(ConsumerPathZNode.path, new Stat())
-    assertTrue(consumerPathAcls.asScala.forall(TestUtils.isAclUnsecure), "old consumer znode path acls are not open")
+    assertTrue("old consumer znode path acls are not open", consumerPathAcls.asScala.forall(TestUtils.isAclUnsecure))
   }
 }

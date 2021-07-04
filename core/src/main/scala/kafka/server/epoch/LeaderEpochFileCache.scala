@@ -16,17 +16,15 @@
   */
 package kafka.server.epoch
 
-import java.util
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import kafka.server.checkpoints.LeaderEpochCheckpoint
+import org.apache.kafka.common.requests.EpochEndOffset._
 import kafka.utils.CoreUtils._
 import kafka.utils.Logging
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.{UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET}
 
-import scala.collection.{Seq, mutable}
-import scala.jdk.CollectionConverters._
+import scala.collection.mutable.ListBuffer
 
 /**
  * Represents a cache of (LeaderEpoch => Offset) mappings for a particular replica.
@@ -36,114 +34,61 @@ import scala.jdk.CollectionConverters._
  *
  * @param topicPartition the associated topic partition
  * @param checkpoint the checkpoint file
+ * @param logEndOffset function to fetch the current log end offset
  */
 class LeaderEpochFileCache(topicPartition: TopicPartition,
+                           logEndOffset: () => Long,
                            checkpoint: LeaderEpochCheckpoint) extends Logging {
   this.logIdent = s"[LeaderEpochCache $topicPartition] "
 
   private val lock = new ReentrantReadWriteLock()
-  private val epochs = new util.TreeMap[Int, EpochEntry]()
-
-  inWriteLock(lock) {
-    checkpoint.read().foreach(assign)
-  }
+  private var epochs: ListBuffer[EpochEntry] = inWriteLock(lock) { ListBuffer(checkpoint.read(): _*) }
 
   /**
     * Assigns the supplied Leader Epoch to the supplied Offset
     * Once the epoch is assigned it cannot be reassigned
     */
   def assign(epoch: Int, startOffset: Long): Unit = {
-    val entry = EpochEntry(epoch, startOffset)
-    if (assign(entry)) {
-      debug(s"Appended new epoch entry $entry. Cache now contains ${epochs.size} entries.")
-      flush()
-    }
-  }
-
-  private def assign(entry: EpochEntry): Boolean = {
-    if (entry.epoch < 0 || entry.startOffset < 0) {
-      throw new IllegalArgumentException(s"Received invalid partition leader epoch entry $entry")
-    }
-
-    def isUpdateNeeded: Boolean = {
-      latestEntry match {
-        case Some(lastEntry) =>
-          entry.epoch != lastEntry.epoch || entry.startOffset < lastEntry.startOffset
-        case None =>
-          true
-      }
-    }
-
-    // Check whether the append is needed before acquiring the write lock
-    // in order to avoid contention with readers in the common case
-    if (!isUpdateNeeded)
-      return false
-
     inWriteLock(lock) {
-      if (isUpdateNeeded) {
-        maybeTruncateNonMonotonicEntries(entry)
-        epochs.put(entry.epoch, entry)
+      val updateNeeded = if (epochs.isEmpty) {
         true
       } else {
-        false
+        val lastEntry = epochs.last
+        lastEntry.epoch != epoch || startOffset < lastEntry.startOffset
+      }
+
+      if (updateNeeded) {
+        truncateAndAppend(EpochEntry(epoch, startOffset))
+        flush()
       }
     }
   }
 
   /**
-   * Remove any entries which violate monotonicity prior to appending a new entry
+   * Remove any entries which violate monotonicity following the insertion of an assigned epoch.
    */
-  private def maybeTruncateNonMonotonicEntries(newEntry: EpochEntry): Unit = {
-    val removedEpochs = removeFromEnd { entry =>
-      entry.epoch >= newEntry.epoch || entry.startOffset >= newEntry.startOffset
+  private def truncateAndAppend(entryToAppend: EpochEntry): Unit = {
+    validateAndMaybeWarn(entryToAppend)
+
+    val (retainedEpochs, removedEpochs) = epochs.partition { entry =>
+      entry.epoch < entryToAppend.epoch && entry.startOffset < entryToAppend.startOffset
     }
 
-    if (removedEpochs.size > 1
-      || (removedEpochs.nonEmpty && removedEpochs.head.startOffset != newEntry.startOffset)) {
+    epochs = retainedEpochs :+ entryToAppend
 
+    if (removedEpochs.isEmpty) {
+      debug(s"Appended new epoch entry $entryToAppend. Cache now contains ${epochs.size} entries.")
+    } else if (removedEpochs.size > 1 || removedEpochs.head.startOffset != entryToAppend.startOffset) {
       // Only log a warning if there were non-trivial removals. If the start offset of the new entry
-      // matches the start offset of the removed epoch, then no data has been written and the truncation
+      // matches the start offfset of the removed epoch, then no data has been written and the truncation
       // is expected.
-      warn(s"New epoch entry $newEntry caused truncation of conflicting entries $removedEpochs. " +
+      warn(s"New epoch entry $entryToAppend caused truncation of conflicting entries $removedEpochs. " +
         s"Cache now contains ${epochs.size} entries.")
     }
   }
 
-  private def removeFromEnd(predicate: EpochEntry => Boolean): Seq[EpochEntry] = {
-    removeWhileMatching(epochs.descendingMap.entrySet().iterator(), predicate)
-  }
-
-  private def removeFromStart(predicate: EpochEntry => Boolean): Seq[EpochEntry] = {
-    removeWhileMatching(epochs.entrySet().iterator(), predicate)
-  }
-
-  private def removeWhileMatching(
-    iterator: util.Iterator[util.Map.Entry[Int, EpochEntry]],
-    predicate: EpochEntry => Boolean
-  ): Seq[EpochEntry] = {
-    val removedEpochs = mutable.ListBuffer.empty[EpochEntry]
-
-    while (iterator.hasNext) {
-      val entry = iterator.next().getValue
-      if (predicate.apply(entry)) {
-        removedEpochs += entry
-        iterator.remove()
-      } else {
-        return removedEpochs
-      }
-    }
-
-    removedEpochs
-  }
-
   def nonEmpty: Boolean = inReadLock(lock) {
-    !epochs.isEmpty
-  }
-
-  def latestEntry: Option[EpochEntry] = {
-    inReadLock(lock) {
-      Option(epochs.lastEntry).map(_.getValue)
-    }
+    epochs.nonEmpty
   }
 
   /**
@@ -151,12 +96,8 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
    * which has messages assigned to it.
    */
   def latestEpoch: Option[Int] = {
-    latestEntry.map(_.epoch)
-  }
-
-  def previousEpoch: Option[Int] = {
     inReadLock(lock) {
-      latestEntry.flatMap(entry => Option(epochs.lowerEntry(entry.epoch))).map(_.getKey)
+      epochs.lastOption.map(_.epoch)
     }
   }
 
@@ -165,7 +106,7 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
    */
   def earliestEntry: Option[EpochEntry] = {
     inReadLock(lock) {
-      Option(epochs.firstEntry).map(_.getValue)
+      epochs.headOption
     }
   }
 
@@ -178,14 +119,13 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
     * Offset if the latest epoch was requested.
     *
     * During the upgrade phase, where there are existing messages may not have a leader epoch,
-    * if requestedEpoch is < the first epoch cached, UNDEFINED_EPOCH_OFFSET will be returned
+    * if requestedEpoch is < the first epoch cached, UNSUPPORTED_EPOCH_OFFSET will be returned
     * so that the follower falls back to High Water Mark.
     *
     * @param requestedEpoch requested leader epoch
-    * @param logEndOffset the existing Log End Offset
     * @return found leader epoch and end offset
     */
-  def endOffsetFor(requestedEpoch: Int, logEndOffset: Long): (Int, Long) = {
+  def endOffsetFor(requestedEpoch: Int): (Int, Long) = {
     inReadLock(lock) {
       val epochAndOffset =
         if (requestedEpoch == UNDEFINED_EPOCH) {
@@ -197,30 +137,27 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
           // Followers should not have any reason to query for the end offset of the current epoch, but a consumer
           // might if it is verifying its committed offset following a group rebalance. In this case, we return
           // the current log end offset which makes the truncation check work as expected.
-          (requestedEpoch, logEndOffset)
+          (requestedEpoch, logEndOffset())
         } else {
-          val higherEntry = epochs.higherEntry(requestedEpoch)
-          if (higherEntry == null) {
+          val (subsequentEpochs, previousEpochs) = epochs.partition { e => e.epoch > requestedEpoch}
+          if (subsequentEpochs.isEmpty) {
             // The requested epoch is larger than any known epoch. This case should never be hit because
             // the latest cached epoch is always the largest.
             (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET)
+          } else if (previousEpochs.isEmpty) {
+            // The requested epoch is smaller than any known epoch, so we return the start offset of the first
+            // known epoch which is larger than it. This may be inaccurate as there could have been
+            // epochs in between, but the point is that the data has already been removed from the log
+            // and we want to ensure that the follower can replicate correctly beginning from the leader's
+            // start offset.
+            (requestedEpoch, subsequentEpochs.head.startOffset)
           } else {
-            val floorEntry = epochs.floorEntry(requestedEpoch)
-            if (floorEntry == null) {
-              // The requested epoch is smaller than any known epoch, so we return the start offset of the first
-              // known epoch which is larger than it. This may be inaccurate as there could have been
-              // epochs in between, but the point is that the data has already been removed from the log
-              // and we want to ensure that the follower can replicate correctly beginning from the leader's
-              // start offset.
-              (requestedEpoch, higherEntry.getValue.startOffset)
-            } else {
-              // We have at least one previous epoch and one subsequent epoch. The result is the first
-              // prior epoch and the starting offset of the first subsequent epoch.
-              (floorEntry.getValue.epoch, higherEntry.getValue.startOffset)
-            }
+            // We have at least one previous epoch and one subsequent epoch. The result is the first
+            // prior epoch and the starting offset of the first subsequent epoch.
+            (previousEpochs.last.epoch, subsequentEpochs.head.startOffset)
           }
         }
-      trace(s"Processed end offset request for epoch $requestedEpoch and returning epoch ${epochAndOffset._1} " +
+      debug(s"Processed end offset request for epoch $requestedEpoch and returning epoch ${epochAndOffset._1} " +
         s"with end offset ${epochAndOffset._2} from epoch cache of size ${epochs.size}")
       epochAndOffset
     }
@@ -232,11 +169,12 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
   def truncateFromEnd(endOffset: Long): Unit = {
     inWriteLock(lock) {
       if (endOffset >= 0 && latestEntry.exists(_.startOffset >= endOffset)) {
-        val removedEntries = removeFromEnd(_.startOffset >= endOffset)
+        val (subsequentEntries, previousEntries) = epochs.partition(_.startOffset >= endOffset)
+        epochs = previousEntries
 
         flush()
 
-        debug(s"Cleared entries $removedEntries from epoch cache after " +
+        debug(s"Cleared entries $subsequentEntries from epoch cache after " +
           s"truncating to end offset $endOffset, leaving ${epochs.size} entries in the cache.")
       }
     }
@@ -246,24 +184,24 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
     * Clears old epoch entries. This method searches for the oldest epoch < offset, updates the saved epoch offset to
     * be offset, then clears any previous epoch entries.
     *
-    * This method is exclusive: so truncateFromStart(6) will retain an entry at offset 6.
+    * This method is exclusive: so clearEarliest(6) will retain an entry at offset 6.
     *
     * @param startOffset the offset to clear up to
     */
   def truncateFromStart(startOffset: Long): Unit = {
     inWriteLock(lock) {
-      val removedEntries = removeFromStart { entry =>
-        entry.startOffset <= startOffset
-      }
+      if (epochs.nonEmpty) {
+        val (subsequentEntries, previousEntries) = epochs.partition(_.startOffset > startOffset)
 
-      removedEntries.lastOption.foreach { firstBeforeStartOffset =>
-        val updatedFirstEntry = EpochEntry(firstBeforeStartOffset.epoch, startOffset)
-        epochs.put(updatedFirstEntry.epoch, updatedFirstEntry)
+        previousEntries.lastOption.foreach { firstBeforeStartOffset =>
+          val updatedFirstEntry = EpochEntry(firstBeforeStartOffset.epoch, startOffset)
+          epochs = updatedFirstEntry +: subsequentEntries
 
-        flush()
+          flush()
 
-        debug(s"Cleared entries $removedEntries and rewrote first entry $updatedFirstEntry after " +
-          s"truncating to start offset $startOffset, leaving ${epochs.size} in the cache.")
+          debug(s"Cleared entries $previousEntries and rewrote first entry $updatedFirstEntry after " +
+            s"truncating to start offset $startOffset, leaving ${epochs.size} in the cache.")
+        }
       }
     }
   }
@@ -271,26 +209,50 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
   /**
     * Delete all entries.
     */
-  def clearAndFlush(): Unit = {
+  def clearAndFlush() = {
     inWriteLock(lock) {
       epochs.clear()
       flush()
     }
   }
 
-  def clear(): Unit = {
+  def clear() = {
     inWriteLock(lock) {
       epochs.clear()
     }
   }
 
   // Visible for testing
-  def epochEntries: Seq[EpochEntry] = epochs.values.asScala.toSeq
-
-  private def flush(): Unit = {
-    checkpoint.write(epochs.values.asScala)
+  def epochEntries: ListBuffer[EpochEntry] = {
+    epochs
   }
 
+  private def latestEntry: Option[EpochEntry] = epochs.lastOption
+
+  private def flush(): Unit = {
+    checkpoint.write(epochs)
+  }
+
+  private def validateAndMaybeWarn(entry: EpochEntry) = {
+    if (entry.epoch < 0) {
+      throw new IllegalArgumentException(s"Received invalid partition leader epoch entry $entry")
+    } else {
+      // If the latest append violates the monotonicity of epochs or starting offsets, our choices
+      // are either to raise an error, ignore the append, or allow the append and truncate the
+      // conflicting entries from the cache. Raising an error risks killing the fetcher threads in
+      // pathological cases (i.e. cases we are not yet aware of). We instead take the final approach
+      // and assume that the latest append is always accurate.
+
+      latestEntry.foreach { latest =>
+        if (entry.epoch < latest.epoch)
+          warn(s"Received leader epoch assignment $entry which has an epoch less than the epoch " +
+            s"of the latest entry $latest. This implies messages have arrived out of order.")
+        else if (entry.startOffset < latest.startOffset)
+          warn(s"Received leader epoch assignment $entry which has a starting offset which is less than " +
+            s"the starting offset of the latest entry $latest. This implies messages have arrived out of order.")
+      }
+    }
+  }
 }
 
 // Mapping of epoch to the first offset of the subsequent epoch

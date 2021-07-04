@@ -249,17 +249,17 @@ public abstract class TimestampConverter<R extends ConnectRecord<R>> implements 
         final String field = simpleConfig.getString(FIELD_CONFIG);
         final String type = simpleConfig.getString(TARGET_TYPE_CONFIG);
         String formatPattern = simpleConfig.getString(FORMAT_CONFIG);
-        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
+        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
 
         if (!VALID_TYPES.contains(type)) {
             throw new ConfigException("Unknown timestamp type in TimestampConverter: " + type + ". Valid values are "
                     + Utils.join(VALID_TYPES, ", ") + ".");
         }
-        if (type.equals(TYPE_STRING) && Utils.isBlank(formatPattern)) {
+        if (type.equals(TYPE_STRING) && formatPattern.trim().isEmpty()) {
             throw new ConfigException("TimestampConverter requires format option to be specified when using string timestamps");
         }
         SimpleDateFormat format = null;
-        if (!Utils.isBlank(formatPattern)) {
+        if (formatPattern != null && !formatPattern.trim().isEmpty()) {
             try {
                 format = new SimpleDateFormat(formatPattern);
                 format.setTimeZone(UTC);

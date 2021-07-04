@@ -17,37 +17,39 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.message.OffsetForLeaderEpochRequestData.OffsetForLeaderTopicCollection;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import java.util.Collections;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class OffsetsForLeaderEpochRequestTest {
 
     @Test
     public void testForConsumerRequiresVersion3() {
-        OffsetsForLeaderEpochRequest.Builder builder = OffsetsForLeaderEpochRequest.Builder.forConsumer(new OffsetForLeaderTopicCollection());
+        OffsetsForLeaderEpochRequest.Builder builder = OffsetsForLeaderEpochRequest.Builder.forConsumer(Collections.emptyMap());
         for (short version = 0; version < 3; version++) {
             final short v = version;
             assertThrows(UnsupportedVersionException.class, () -> builder.build(v));
         }
 
-        for (short version = 3; version <= ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion(); version++) {
-            OffsetsForLeaderEpochRequest request = builder.build(version);
+        for (short version = 3; version < ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion(); version++) {
+            OffsetsForLeaderEpochRequest request = builder.build((short) 3);
             assertEquals(OffsetsForLeaderEpochRequest.CONSUMER_REPLICA_ID, request.replicaId());
         }
     }
 
     @Test
     public void testDefaultReplicaId() {
-        for (short version : ApiKeys.OFFSET_FOR_LEADER_EPOCH.allVersions()) {
+        for (short version = 0; version < ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion(); version++) {
             int replicaId = 1;
             OffsetsForLeaderEpochRequest.Builder builder = OffsetsForLeaderEpochRequest.Builder.forFollower(
-                    version, new OffsetForLeaderTopicCollection(), replicaId);
+                    version, Collections.emptyMap(), replicaId);
             OffsetsForLeaderEpochRequest request = builder.build();
-            OffsetsForLeaderEpochRequest parsed = OffsetsForLeaderEpochRequest.parse(request.serialize(), version);
+            OffsetsForLeaderEpochRequest parsed = (OffsetsForLeaderEpochRequest) AbstractRequest.parseRequest(
+                    ApiKeys.OFFSET_FOR_LEADER_EPOCH, version, request.toStruct());
             if (version < 3)
                 assertEquals(OffsetsForLeaderEpochRequest.DEBUGGING_REPLICA_ID, parsed.replicaId());
             else

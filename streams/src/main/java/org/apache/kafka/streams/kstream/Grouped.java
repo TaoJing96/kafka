@@ -14,7 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.kafka.streams.kstream;
+
 
 import org.apache.kafka.common.serialization.Serde;
 
@@ -32,6 +34,7 @@ public class Grouped<K, V> implements NamedOperation<Grouped<K, V>> {
     protected final Serde<K> keySerde;
     protected final Serde<V> valueSerde;
     protected final String name;
+
 
     private Grouped(final String name,
                     final Serde<K> keySerde,
@@ -68,7 +71,7 @@ public class Grouped<K, V> implements NamedOperation<Grouped<K, V>> {
      * @see KStream#groupBy(KeyValueMapper, Grouped)
      * @see KTable#groupBy(KeyValueMapper, Grouped)
      */
-    public static <K, V> Grouped<K, V> keySerde(final Serde<K> keySerde) {
+    public static <K> Grouped keySerde(final Serde<K> keySerde) {
         return new Grouped<>(null, keySerde, null);
     }
 
@@ -82,7 +85,7 @@ public class Grouped<K, V> implements NamedOperation<Grouped<K, V>> {
      * @see KStream#groupBy(KeyValueMapper, Grouped)
      * @see KTable#groupBy(KeyValueMapper, Grouped)
      */
-    public static <K, V> Grouped<K, V> valueSerde(final Serde<V> valueSerde) {
+    public static <V> Grouped valueSerde(final Serde<V> valueSerde) {
         return new Grouped<>(null, null, valueSerde);
     }
 

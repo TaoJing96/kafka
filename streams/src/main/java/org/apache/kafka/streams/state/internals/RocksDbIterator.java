@@ -25,14 +25,12 @@ import org.rocksdb.RocksIterator;
 
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.function.Consumer;
 
 class RocksDbIterator extends AbstractIterator<KeyValue<Bytes, byte[]>> implements KeyValueIterator<Bytes, byte[]> {
 
     private final String storeName;
     private final RocksIterator iter;
     private final Set<KeyValueIterator<Bytes, byte[]>> openIterators;
-    private final Consumer<RocksIterator> advanceIterator;
 
     private volatile boolean open = true;
 
@@ -40,12 +38,10 @@ class RocksDbIterator extends AbstractIterator<KeyValue<Bytes, byte[]>> implemen
 
     RocksDbIterator(final String storeName,
                     final RocksIterator iter,
-                    final Set<KeyValueIterator<Bytes, byte[]>> openIterators,
-                    final boolean forward) {
+                    final Set<KeyValueIterator<Bytes, byte[]>> openIterators) {
         this.storeName = storeName;
         this.iter = iter;
         this.openIterators = openIterators;
-        this.advanceIterator = forward ? RocksIterator::next : RocksIterator::prev;
     }
 
     @Override
@@ -62,13 +58,18 @@ class RocksDbIterator extends AbstractIterator<KeyValue<Bytes, byte[]>> implemen
             return allDone();
         } else {
             next = getKeyValue();
-            advanceIterator.accept(iter);
+            iter.next();
             return next;
         }
     }
 
     private KeyValue<Bytes, byte[]> getKeyValue() {
         return new KeyValue<>(new Bytes(iter.key()), iter.value());
+    }
+
+    @Override
+    public void remove() {
+        throw new UnsupportedOperationException("RocksDB iterator does not support remove()");
     }
 
     @Override

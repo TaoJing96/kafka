@@ -21,9 +21,9 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.rest.ConnectRestExtensionContext;
 import org.easymock.Capture;
 import org.easymock.EasyMock;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
 
 import javax.security.auth.login.Configuration;
 import javax.ws.rs.core.Configurable;
@@ -33,27 +33,27 @@ import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class BasicAuthSecurityRestExtensionTest {
 
     Configuration priorConfiguration;
 
-    @BeforeEach
+    @Before
     public void setup() {
         priorConfiguration = Configuration.getConfiguration();
     }
 
-    @AfterEach
+    @After
     public void tearDown() {
         Configuration.setConfiguration(priorConfiguration);
     }
-
-    @SuppressWarnings("unchecked")
+  
     @Test
+    @SuppressWarnings("unchecked")
     public void testJaasConfigurationNotOverwritten() {
         Capture<JaasBasicAuthFilter> jaasFilter = EasyMock.newCapture();
         Configurable<? extends Configurable<?>> configurable = EasyMock.mock(Configurable.class);
@@ -61,7 +61,7 @@ public class BasicAuthSecurityRestExtensionTest {
   
         ConnectRestExtensionContext context = EasyMock.mock(ConnectRestExtensionContext.class);
         EasyMock.expect(context.configurable()).andReturn((Configurable) configurable);
-
+  
         EasyMock.replay(configurable, context);
   
         BasicAuthSecurityRestExtension extension = new BasicAuthSecurityRestExtension();
@@ -69,8 +69,11 @@ public class BasicAuthSecurityRestExtensionTest {
         Configuration.setConfiguration(overwrittenConfiguration);
         extension.register(context);
   
-        assertNotEquals(overwrittenConfiguration, jaasFilter.getValue().configuration,
-            "Overwritten JAAS configuration should not be used by basic auth REST extension");
+        assertNotEquals(
+            "Overwritten JAAS configuration should not be used by basic auth REST extension",
+            overwrittenConfiguration,
+            jaasFilter.getValue().configuration
+        );
     }
 
     @Test

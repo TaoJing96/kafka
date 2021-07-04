@@ -43,7 +43,6 @@ import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
 import static java.util.Collections.emptyMap;
@@ -61,7 +60,6 @@ import static org.apache.kafka.connect.runtime.errors.DeadLetterQueueReporter.ER
 import static org.easymock.EasyMock.replay;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(PowerMockRunner.class)
@@ -97,9 +95,9 @@ public class ErrorReporterTest {
         }
     }
 
-    @Test
+    @Test(expected = NullPointerException.class)
     public void initializeDLQWithNullMetrics() {
-        assertThrows(NullPointerException.class, () -> new DeadLetterQueueReporter(producer, config(emptyMap()), TASK_ID, null));
+        new DeadLetterQueueReporter(producer, config(emptyMap()), TASK_ID, null);
     }
 
     @Test
@@ -143,21 +141,6 @@ public class ErrorReporterTest {
         replay(producer);
 
         deadLetterQueueReporter.report(context);
-        deadLetterQueueReporter.report(context);
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testDLQReportAndReturnFuture() {
-        DeadLetterQueueReporter deadLetterQueueReporter = new DeadLetterQueueReporter(
-            producer, config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC)), TASK_ID, errorHandlingMetrics);
-
-        ProcessingContext context = processingContext();
-
-        EasyMock.expect(producer.send(EasyMock.anyObject(), EasyMock.anyObject())).andReturn(metadata);
-        replay(producer);
-
         deadLetterQueueReporter.report(context);
 
         PowerMock.verifyAll();
@@ -226,25 +209,6 @@ public class ErrorReporterTest {
         assertEquals("Error encountered in task job-0. Executing stage 'KEY_CONVERTER' with class " +
                 "'org.apache.kafka.connect.json.JsonConverter', where consumed record is {topic='test-topic', " +
                 "partition=5, offset=100}.", msg);
-    }
-
-    @Test
-    public void testLogReportAndReturnFuture() {
-        Map<String, String> props = new HashMap<>();
-        props.put(ConnectorConfig.ERRORS_LOG_ENABLE_CONFIG, "true");
-        props.put(ConnectorConfig.ERRORS_LOG_INCLUDE_MESSAGES_CONFIG, "true");
-
-        LogReporter logReporter = new LogReporter(TASK_ID, config(props), errorHandlingMetrics);
-
-        ProcessingContext context = processingContext();
-
-        String msg = logReporter.message(context);
-        assertEquals("Error encountered in task job-0. Executing stage 'KEY_CONVERTER' with class " +
-            "'org.apache.kafka.connect.json.JsonConverter', where consumed record is {topic='test-topic', " +
-            "partition=5, offset=100}.", msg);
-
-        Future<RecordMetadata> future = logReporter.report(context);
-        assertTrue(future instanceof CompletableFuture);
     }
 
     @Test

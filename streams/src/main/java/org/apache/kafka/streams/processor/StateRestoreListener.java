@@ -29,12 +29,9 @@ import org.apache.kafka.common.TopicPartition;
  * Users desiring stateful operations will need to provide synchronization internally in
  * the {@code StateRestorerListener} implementation.
  *
- * Note that this listener is only registered at the per-client level and users can base on the {@code storeName}
- * parameter to define specific monitoring for different {@link StateStore}s. There is another
- * {@link StateRestoreCallback} interface which is registered via the {@link ProcessorContext#register(StateStore, StateRestoreCallback)}
- * function per-store, and it is used to apply the fetched changelog records into the local state store during restoration.
- * These two interfaces serve different restoration purposes and users should not try to implement both of them in a single
- * class during state store registration.
+ * When used for monitoring a single {@link StateStore} using either {@link AbstractNotifyingRestoreCallback} or
+ * {@link AbstractNotifyingBatchingRestoreCallback} no synchronization is necessary
+ * as each StreamThread has its own StateStore instance.
  *
  * Incremental updates are exposed so users can estimate how much progress has been made.
  */

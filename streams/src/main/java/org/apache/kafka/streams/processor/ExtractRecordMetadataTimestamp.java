@@ -17,6 +17,7 @@
 package org.apache.kafka.streams.processor;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.annotation.InterfaceStability;
 
 /**
  * Retrieves embedded metadata timestamps from Kafka messages.
@@ -39,9 +40,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
  *
  * @see FailOnInvalidTimestamp
  * @see LogAndSkipOnInvalidTimestamp
- * @see UsePartitionTimeOnInvalidTimestamp
+ * @see UsePreviousTimeOnInvalidTimestamp
  * @see WallclockTimestampExtractor
  */
+@InterfaceStability.Evolving
 abstract class ExtractRecordMetadataTimestamp implements TimestampExtractor {
 
     /**

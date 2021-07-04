@@ -17,15 +17,14 @@
 
 package org.apache.kafka.common.utils;
 
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
 import java.util.Collections;
+
+import org.junit.Test;
 
 public class CircularIteratorTest {
 
@@ -49,9 +48,9 @@ public class CircularIteratorTest {
         assertEquals("B", it.peek());
         assertTrue(it.hasNext());
         assertEquals("B", it.next());
-        assertNull(it.peek());
+        assertEquals(null, it.peek());
         assertTrue(it.hasNext());
-        assertNull(it.next());
+        assertEquals(null, it.next());
         assertEquals("C", it.peek());
         assertTrue(it.hasNext());
         assertEquals("C", it.next());

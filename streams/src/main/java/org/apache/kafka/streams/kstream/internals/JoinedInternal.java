@@ -37,6 +37,8 @@ public class JoinedInternal<K, V, VO> extends Joined<K, V, VO>  {
         return otherValueSerde;
     }
 
+    @Override // TODO remove annotation when super.name() is removed
+    @SuppressWarnings("deprecation") // this method should not be removed if super.name() is removed
     public String name() {
         return name;
     }

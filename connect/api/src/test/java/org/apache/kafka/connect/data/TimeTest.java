@@ -17,14 +17,13 @@
 package org.apache.kafka.connect.data;
 
 import org.apache.kafka.connect.errors.DataException;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Calendar;
 import java.util.GregorianCalendar;
 import java.util.TimeZone;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 public class TimeTest {
     private static final GregorianCalendar EPOCH;
@@ -57,16 +56,14 @@ public class TimeTest {
         assertEquals(10000, Time.fromLogical(Time.SCHEMA, EPOCH_PLUS_TEN_THOUSAND_MILLIS.getTime()));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testFromLogicalInvalidSchema() {
-        assertThrows(DataException.class,
-            () -> Time.fromLogical(Time.builder().name("invalid").build(), EPOCH.getTime()));
+        Time.fromLogical(Time.builder().name("invalid").build(), EPOCH.getTime());
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testFromLogicalInvalidHasDateComponents() {
-        assertThrows(DataException.class,
-            () -> Time.fromLogical(Time.SCHEMA, EPOCH_PLUS_DATE_COMPONENT.getTime()));
+        Time.fromLogical(Time.SCHEMA, EPOCH_PLUS_DATE_COMPONENT.getTime());
     }
 
     @Test
@@ -75,9 +72,8 @@ public class TimeTest {
         assertEquals(EPOCH_PLUS_TEN_THOUSAND_MILLIS.getTime(), Time.toLogical(Time.SCHEMA, 10000));
     }
 
-    @Test
+    @Test(expected = DataException.class)
     public void testToLogicalInvalidSchema() {
-        assertThrows(DataException.class,
-            () -> Time.toLogical(Time.builder().name("invalid").build(), 0));
+        Time.toLogical(Time.builder().name("invalid").build(), 0);
     }
 }

@@ -56,11 +56,4 @@ public class Frequency {
         return this.centerValue;
     }
 
-    @Override
-    public String toString() {
-        return "Frequency(" +
-            "name=" + name +
-            ", centerValue=" + centerValue +
-            ')';
-    }
 }

@@ -62,7 +62,6 @@ public class StateTrackerTest {
         assertEquals(0.0d, tracker.durationRatio(State.PAUSED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.FAILED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.DESTROYED, time.milliseconds()), DELTA);
-        assertEquals(0.0d, tracker.durationRatio(State.RESTARTING, time.milliseconds()), DELTA);
 
         tracker.changeState(State.RUNNING, time.milliseconds());
         time.sleep(3000L);
@@ -71,7 +70,6 @@ public class StateTrackerTest {
         assertEquals(0.0d, tracker.durationRatio(State.PAUSED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.FAILED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.DESTROYED, time.milliseconds()), DELTA);
-        assertEquals(0.0d, tracker.durationRatio(State.RESTARTING, time.milliseconds()), DELTA);
 
         tracker.changeState(State.PAUSED, time.milliseconds());
         time.sleep(4000L);
@@ -80,7 +78,6 @@ public class StateTrackerTest {
         assertEquals(0.500d, tracker.durationRatio(State.PAUSED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.FAILED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.DESTROYED, time.milliseconds()), DELTA);
-        assertEquals(0.0d, tracker.durationRatio(State.RESTARTING, time.milliseconds()), DELTA);
 
         tracker.changeState(State.RUNNING, time.milliseconds());
         time.sleep(8000L);
@@ -89,7 +86,6 @@ public class StateTrackerTest {
         assertEquals(0.2500d, tracker.durationRatio(State.PAUSED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.FAILED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.DESTROYED, time.milliseconds()), DELTA);
-        assertEquals(0.0d, tracker.durationRatio(State.RESTARTING, time.milliseconds()), DELTA);
 
         tracker.changeState(State.FAILED, time.milliseconds());
         time.sleep(16000L);
@@ -98,7 +94,6 @@ public class StateTrackerTest {
         assertEquals(0.12500d, tracker.durationRatio(State.PAUSED, time.milliseconds()), DELTA);
         assertEquals(0.50000d, tracker.durationRatio(State.FAILED, time.milliseconds()), DELTA);
         assertEquals(0.0d, tracker.durationRatio(State.DESTROYED, time.milliseconds()), DELTA);
-        assertEquals(0.0d, tracker.durationRatio(State.RESTARTING, time.milliseconds()), DELTA);
 
     }
 

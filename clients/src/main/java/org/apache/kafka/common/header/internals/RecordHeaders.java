@@ -23,6 +23,7 @@ import org.apache.kafka.common.utils.AbstractIterator;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -37,7 +38,11 @@ public class RecordHeaders implements Headers {
     }
 
     public RecordHeaders(Header[] headers) {
-        this(headers == null ? null : Arrays.asList(headers));
+        if (headers == null) {
+            this.headers = new ArrayList<>();
+        } else {
+            this.headers = new ArrayList<>(Arrays.asList(headers));
+        }
     }
 
     public RecordHeaders(Iterable<Header> headers) {
@@ -46,12 +51,12 @@ public class RecordHeaders implements Headers {
             this.headers = new ArrayList<>();
         } else if (headers instanceof RecordHeaders) {
             this.headers = new ArrayList<>(((RecordHeaders) headers).headers);
+        } else if (headers instanceof Collection) {
+            this.headers = new ArrayList<>((Collection<Header>) headers);
         } else {
             this.headers = new ArrayList<>();
-            for (Header header : headers) {
-                Objects.requireNonNull(header, "Header cannot be null.");
+            for (Header header : headers)
                 this.headers.add(header);
-            }
         }
     }
 
@@ -109,7 +114,7 @@ public class RecordHeaders implements Headers {
     }
 
     public Header[] toArray() {
-        return headers.isEmpty() ? Record.EMPTY_HEADERS : headers.toArray(new Header[0]);     
+        return headers.isEmpty() ? Record.EMPTY_HEADERS : headers.toArray(new Header[headers.size()]);
     }
 
     private void checkKey(String key) {

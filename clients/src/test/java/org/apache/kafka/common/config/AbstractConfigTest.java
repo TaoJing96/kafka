@@ -26,7 +26,7 @@ import org.apache.kafka.common.metrics.MetricsReporter;
 import org.apache.kafka.common.security.TestSecurityConfig;
 import org.apache.kafka.common.config.provider.MockVaultConfigProvider;
 import org.apache.kafka.common.config.provider.MockFileConfigProvider;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,12 +36,11 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.junit.Assert.assertEquals;
 
 public class AbstractConfigTest {
 
@@ -221,19 +220,18 @@ public class AbstractConfigTest {
     }
 
     @Test
-    public void testUnusedConfigs() {
+    public void testUnused() {
         Properties props = new Properties();
         String configValue = "org.apache.kafka.common.config.AbstractConfigTest$ConfiguredFakeMetricsReporter";
         props.put(TestConfig.METRIC_REPORTER_CLASSES_CONFIG, configValue);
-        props.put(ConfiguredFakeMetricsReporter.EXTRA_CONFIG, "my_value");
+        props.put(FakeMetricsReporterConfig.EXTRA_CONFIG, "my_value");
         TestConfig config = new TestConfig(props);
 
-        assertTrue(config.unused().contains(ConfiguredFakeMetricsReporter.EXTRA_CONFIG),
-            ConfiguredFakeMetricsReporter.EXTRA_CONFIG + " should be marked unused before getConfiguredInstances is called");
+        assertTrue("metric.extra_config should be marked unused before getConfiguredInstances is called",
+            config.unused().contains(FakeMetricsReporterConfig.EXTRA_CONFIG));
 
         config.getConfiguredInstances(TestConfig.METRIC_REPORTER_CLASSES_CONFIG, MetricsReporter.class);
-        assertFalse(config.unused().contains(ConfiguredFakeMetricsReporter.EXTRA_CONFIG),
-            ConfiguredFakeMetricsReporter.EXTRA_CONFIG + " should be marked as used");
+        assertTrue("All defined configurations should be marked as used", config.unused().isEmpty());
     }
 
     private void testValidInputs(String configValue) {
@@ -277,48 +275,52 @@ public class AbstractConfigTest {
         ClassLoader restrictedClassLoader = new RestrictedClassLoader();
         ClassLoader defaultClassLoader = AbstractConfig.class.getClassLoader();
 
-        ClassLoader originClassLoader = Thread.currentThread().getContextClassLoader();
+        // Test default classloading where all classes are visible to thread context classloader
+        Thread.currentThread().setContextClassLoader(defaultClassLoader);
+        ClassTestConfig testConfig = new ClassTestConfig();
+        testConfig.checkInstances(ClassTestConfig.DEFAULT_CLASS, ClassTestConfig.DEFAULT_CLASS);
+
+        // Test default classloading where default classes are not visible to thread context classloader
+        // Static classloading is used for default classes, so instance creation should succeed.
+        Thread.currentThread().setContextClassLoader(restrictedClassLoader);
+        testConfig = new ClassTestConfig();
+        testConfig.checkInstances(ClassTestConfig.DEFAULT_CLASS, ClassTestConfig.DEFAULT_CLASS);
+
+        // Test class overrides with names or classes where all classes are visible to thread context classloader
+        Thread.currentThread().setContextClassLoader(defaultClassLoader);
+        ClassTestConfig.testOverrides();
+
+        // Test class overrides with names or classes where all classes are visible to Kafka classloader, context classloader is null
+        Thread.currentThread().setContextClassLoader(null);
+        ClassTestConfig.testOverrides();
+
+        // Test class overrides where some classes are not visible to thread context classloader
+        Thread.currentThread().setContextClassLoader(restrictedClassLoader);
+        // Properties specified as classes should succeed
+        testConfig = new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS, Arrays.asList(ClassTestConfig.RESTRICTED_CLASS));
+        testConfig.checkInstances(ClassTestConfig.RESTRICTED_CLASS, ClassTestConfig.RESTRICTED_CLASS);
+        testConfig = new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS, Arrays.asList(ClassTestConfig.VISIBLE_CLASS, ClassTestConfig.RESTRICTED_CLASS));
+        testConfig.checkInstances(ClassTestConfig.RESTRICTED_CLASS, ClassTestConfig.VISIBLE_CLASS, ClassTestConfig.RESTRICTED_CLASS);
+        // Properties specified as classNames should fail to load classes
         try {
-            // Test default classloading where all classes are visible to thread context classloader
-            Thread.currentThread().setContextClassLoader(defaultClassLoader);
-            ClassTestConfig testConfig = new ClassTestConfig();
-            testConfig.checkInstances(ClassTestConfig.DEFAULT_CLASS, ClassTestConfig.DEFAULT_CLASS);
-
-            // Test default classloading where default classes are not visible to thread context classloader
-            // Static classloading is used for default classes, so instance creation should succeed.
-            Thread.currentThread().setContextClassLoader(restrictedClassLoader);
-            testConfig = new ClassTestConfig();
-            testConfig.checkInstances(ClassTestConfig.DEFAULT_CLASS, ClassTestConfig.DEFAULT_CLASS);
-
-            // Test class overrides with names or classes where all classes are visible to thread context classloader
-            Thread.currentThread().setContextClassLoader(defaultClassLoader);
-            ClassTestConfig.testOverrides();
-
-            // Test class overrides with names or classes where all classes are visible to Kafka classloader, context classloader is null
-            Thread.currentThread().setContextClassLoader(null);
-            ClassTestConfig.testOverrides();
-
-            // Test class overrides where some classes are not visible to thread context classloader
-            Thread.currentThread().setContextClassLoader(restrictedClassLoader);
-            // Properties specified as classes should succeed
-            testConfig = new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS, Collections.singletonList(ClassTestConfig.RESTRICTED_CLASS));
-            testConfig.checkInstances(ClassTestConfig.RESTRICTED_CLASS, ClassTestConfig.RESTRICTED_CLASS);
-            testConfig = new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS, Arrays.asList(ClassTestConfig.VISIBLE_CLASS, ClassTestConfig.RESTRICTED_CLASS));
-            testConfig.checkInstances(ClassTestConfig.RESTRICTED_CLASS, ClassTestConfig.VISIBLE_CLASS, ClassTestConfig.RESTRICTED_CLASS);
-
-            // Properties specified as classNames should fail to load classes
-            assertThrows(ConfigException.class, () -> new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS.getName(), null),
-                "Config created with class property that cannot be loaded");
-
-            ClassTestConfig config = new ClassTestConfig(null, Arrays.asList(ClassTestConfig.VISIBLE_CLASS.getName(), ClassTestConfig.RESTRICTED_CLASS.getName()));
-            assertThrows(KafkaException.class, () -> config.getConfiguredInstances("list.prop", MetricsReporter.class),
-                "Should have failed to load class");
-
-            ClassTestConfig config2 = new ClassTestConfig(null, ClassTestConfig.VISIBLE_CLASS.getName() + "," + ClassTestConfig.RESTRICTED_CLASS.getName());
-            assertThrows(KafkaException.class, () -> config2.getConfiguredInstances("list.prop", MetricsReporter.class),
-                "Should have failed to load class");
-        } finally {
-            Thread.currentThread().setContextClassLoader(originClassLoader);
+            new ClassTestConfig(ClassTestConfig.RESTRICTED_CLASS.getName(), null);
+            fail("Config created with class property that cannot be loaded");
+        } catch (ConfigException e) {
+            // Expected Exception
+        }
+        try {
+            testConfig = new ClassTestConfig(null, Arrays.asList(ClassTestConfig.VISIBLE_CLASS.getName(), ClassTestConfig.RESTRICTED_CLASS.getName()));
+            testConfig.getConfiguredInstances("list.prop", MetricsReporter.class);
+            fail("Should have failed to load class");
+        } catch (KafkaException e) {
+            // Expected Exception
+        }
+        try {
+            testConfig = new ClassTestConfig(null, ClassTestConfig.VISIBLE_CLASS.getName() + "," + ClassTestConfig.RESTRICTED_CLASS.getName());
+            testConfig.getConfiguredInstances("list.prop", MetricsReporter.class);
+            fail("Should have failed to load class");
+        } catch (KafkaException e) {
+            // Expected Exception
         }
     }
 
@@ -330,15 +332,6 @@ public class AbstractConfigTest {
                     "Key must be a string.");
         }
         return (Map<String, ?>) props;
-    }
-
-    @Test
-    public void testOriginalWithOverrides() {
-        Properties props = new Properties();
-        props.put("config.providers", "file");
-        TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-        assertEquals(config.originals().get("config.providers"), "file");
-        assertEquals(config.originals(Collections.singletonMap("config.providers", "file2")).get("config.providers"), "file2");
     }
 
     @Test
@@ -355,10 +348,10 @@ public class AbstractConfigTest {
         props.put("sasl.kerberos.key", "${file:/usr/kerberos:key}");
         props.put("sasl.kerberos.password", "${file:/usr/kerberos:password}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-        assertEquals("testKey", config.originals().get("sasl.kerberos.key"));
-        assertEquals("randomPassword", config.originals().get("sasl.kerberos.password"));
-        assertEquals(5, config.originals().get("prefix.ssl.truststore.location.number"));
-        assertEquals("service name", config.originals().get("sasl.kerberos.service.name"));
+        assertEquals(config.originals().get("sasl.kerberos.key"), "testKey");
+        assertEquals(config.originals().get("sasl.kerberos.password"), "randomPassword");
+        assertEquals(config.originals().get("prefix.ssl.truststore.location.number"), 5);
+        assertEquals(config.originals().get("sasl.kerberos.service.name"), "service name");
         MockFileConfigProvider.assertClosed(id);
     }
 
@@ -374,8 +367,8 @@ public class AbstractConfigTest {
         props.put("sasl.kerberos.key", "${file:/usr/kerberos:key}");
         props.put("sasl.kerberos.password", "${file:/usr/kerberos:password}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props, convertPropertiesToMap(providers));
-        assertEquals("testKey", config.originals().get("sasl.kerberos.key"));
-        assertEquals("randomPassword", config.originals().get("sasl.kerberos.password"));
+        assertEquals(config.originals().get("sasl.kerberos.key"), "testKey");
+        assertEquals(config.originals().get("sasl.kerberos.password"), "randomPassword");
         MockFileConfigProvider.assertClosed(id);
     }
 
@@ -392,7 +385,7 @@ public class AbstractConfigTest {
         Map<?, ?> immutableMap = Collections.unmodifiableMap(props);
         Map<String, ?> provMap = convertPropertiesToMap(providers);
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(immutableMap, provMap);
-        assertEquals("testKey", config.originals().get("sasl.kerberos.key"));
+        assertEquals(config.originals().get("sasl.kerberos.key"), "testKey");
         MockFileConfigProvider.assertClosed(id);
     }
 
@@ -411,10 +404,10 @@ public class AbstractConfigTest {
         props.put("sasl.truststore.key", "${vault:/usr/truststore:truststoreKey}");
         props.put("sasl.truststore.password", "${vault:/usr/truststore:truststorePassword}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props, convertPropertiesToMap(providers));
-        assertEquals("testKey", config.originals().get("sasl.kerberos.key"));
-        assertEquals("randomPassword", config.originals().get("sasl.kerberos.password"));
-        assertEquals("testTruststoreKey", config.originals().get("sasl.truststore.key"));
-        assertEquals("randomtruststorePassword", config.originals().get("sasl.truststore.password"));
+        assertEquals(config.originals().get("sasl.kerberos.key"), "testKey");
+        assertEquals(config.originals().get("sasl.kerberos.password"), "randomPassword");
+        assertEquals(config.originals().get("sasl.truststore.key"), "testTruststoreKey");
+        assertEquals(config.originals().get("sasl.truststore.password"), "randomtruststorePassword");
         MockFileConfigProvider.assertClosed(id);
     }
 
@@ -427,7 +420,7 @@ public class AbstractConfigTest {
             "org.apache.kafka.common.config.provider.InvalidConfigProvider");
         props.put("testKey", "${test:/foo/bar/testpath:testKey}");
         try {
-            new TestIndirectConfigResolution(props);
+            TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
             fail("Expected a config exception due to invalid props :" + props);
         } catch (KafkaException e) {
             // this is good
@@ -440,7 +433,7 @@ public class AbstractConfigTest {
         Properties props = new Properties();
         props.put("testKey", "${test:/foo/bar/testpath:testKey}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-        assertEquals("${test:/foo/bar/testpath:testKey}", config.originals().get("testKey"));
+        assertEquals(config.originals().get("testKey"), "${test:/foo/bar/testpath:testKey}");
     }
 
     @Test
@@ -453,7 +446,7 @@ public class AbstractConfigTest {
         props.put("config.providers.test.param.testId", id);
         props.put("random", "${test:/foo/bar/testpath:random}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-        assertEquals("${test:/foo/bar/testpath:random}", config.originals().get("random"));
+        assertEquals(config.originals().get("random"), "${test:/foo/bar/testpath:random}");
         MockFileConfigProvider.assertClosed(id);
     }
 
@@ -470,7 +463,7 @@ public class AbstractConfigTest {
         props.put("config.providers.file.class", MockVaultConfigProvider.class.getName());
 
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props, convertPropertiesToMap(providers));
-        assertEquals("${file:/usr/kerberos:key}", config.originals().get("sasl.kerberos.key"));
+        assertEquals(config.originals().get("sasl.kerberos.key"), "${file:/usr/kerberos:key}");
     }
 
     @Test
@@ -482,30 +475,11 @@ public class AbstractConfigTest {
         providers.put("config.providers.vault.param.key", "randomKey");
         providers.put("config.providers.vault.param.location", "/usr/vault");
         Properties props = new Properties();
-        props.put("sasl.truststore.key", "${vault:/usr/truststore:truststoreKey}");
+        props.put("sasl.truststore.location", "${vault:/usr/truststore:truststoreKey}");
         props.put("sasl.truststore.password", "${vault:/usr/truststore:truststorePassword}");
         props.put("sasl.truststore.location", "${vault:/usr/truststore:truststoreLocation}");
         TestIndirectConfigResolution config = new TestIndirectConfigResolution(props, convertPropertiesToMap(providers));
-        assertEquals("/usr/vault", config.originals().get("sasl.truststore.location"));
-    }
-
-    @Test
-    public void testDocumentationOf() {
-        Properties props = new Properties();
-        TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-
-        assertEquals(
-                TestIndirectConfigResolution.INDIRECT_CONFIGS_DOC,
-                    config.documentationOf(TestIndirectConfigResolution.INDIRECT_CONFIGS)
-        );
-    }
-
-    @Test
-    public void testDocumentationOfExpectNull() {
-        Properties props = new Properties();
-        TestIndirectConfigResolution config = new TestIndirectConfigResolution(props);
-
-        assertNull(config.documentationOf("xyz"));
+        assertEquals(config.originals().get("sasl.truststore.location"), "/usr/vault");
     }
 
     private static class TestIndirectConfigResolution extends AbstractConfig {
@@ -540,7 +514,7 @@ public class AbstractConfigTest {
         private static final ConfigDef CONFIG;
         static {
             CONFIG = new ConfigDef().define("class.prop", Type.CLASS, DEFAULT_CLASS, Importance.HIGH, "docs")
-                                    .define("list.prop", Type.LIST, Collections.singletonList(DEFAULT_CLASS), Importance.HIGH, "docs");
+                                    .define("list.prop", Type.LIST, Arrays.asList(DEFAULT_CLASS), Importance.HIGH, "docs");
         }
 
         public ClassTestConfig() {
@@ -600,12 +574,26 @@ public class AbstractConfigTest {
     }
 
     public static class ConfiguredFakeMetricsReporter extends FakeMetricsReporter {
-        public static final String EXTRA_CONFIG = "metric.extra_config";
         @Override
         public void configure(Map<String, ?> configs) {
-            // Calling get() should have the side effect of marking that config as used.
-            // this is required by testUnusedConfigs
-            configs.get(EXTRA_CONFIG);
+            FakeMetricsReporterConfig config = new FakeMetricsReporterConfig(configs);
+
+            // Calling getString() should have the side effect of marking that config as used.
+            config.getString(FakeMetricsReporterConfig.EXTRA_CONFIG);
+        }
+    }
+
+    public static class FakeMetricsReporterConfig extends AbstractConfig {
+
+        public static final String EXTRA_CONFIG = "metric.extra_config";
+        private static final String EXTRA_CONFIG_DOC = "An extraneous configuration string.";
+        private static final ConfigDef CONFIG = new ConfigDef().define(
+                EXTRA_CONFIG, ConfigDef.Type.STRING, "",
+                ConfigDef.Importance.LOW, EXTRA_CONFIG_DOC);
+
+
+        public FakeMetricsReporterConfig(Map<?, ?> props) {
+            super(CONFIG, props);
         }
     }
 }

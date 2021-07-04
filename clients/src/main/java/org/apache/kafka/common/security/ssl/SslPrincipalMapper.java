@@ -18,44 +18,53 @@ package org.apache.kafka.common.security.ssl;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.apache.kafka.common.config.internals.BrokerSecurityConfigs.DEFAULT_SSL_PRINCIPAL_MAPPING_RULES;
-
 public class SslPrincipalMapper {
 
-    private static final String RULE_PATTERN = "(DEFAULT)|RULE:((\\\\.|[^\\\\/])*)/((\\\\.|[^\\\\/])*)/([LU]?).*?|(.*?)";
-    private static final Pattern RULE_SPLITTER = Pattern.compile("\\s*(" + RULE_PATTERN + ")\\s*(,\\s*|$)");
-    private static final Pattern RULE_PARSER = Pattern.compile(RULE_PATTERN);
+    private static final Pattern RULE_PARSER = Pattern.compile("((DEFAULT)|(RULE:(([^/]*)/([^/]*))/([LU])?))");
 
     private final List<Rule> rules;
 
-    public SslPrincipalMapper(String sslPrincipalMappingRules) {
-        this.rules = parseRules(splitRules(sslPrincipalMappingRules));
+    public SslPrincipalMapper(List<Rule> sslPrincipalMappingRules) {
+        this.rules = sslPrincipalMappingRules;
     }
 
-    public static SslPrincipalMapper fromRules(String sslPrincipalMappingRules) {
-        return new SslPrincipalMapper(sslPrincipalMappingRules);
+    public static SslPrincipalMapper fromRules(List<String> sslPrincipalMappingRules) {
+        List<String> rules = sslPrincipalMappingRules == null ? Collections.singletonList("DEFAULT") : sslPrincipalMappingRules;
+        return new SslPrincipalMapper(parseRules(rules));
     }
 
-    private static List<String> splitRules(String sslPrincipalMappingRules) {
-        if (sslPrincipalMappingRules == null) {
-            sslPrincipalMappingRules = DEFAULT_SSL_PRINCIPAL_MAPPING_RULES;
+    private static List<String> joinSplitRules(List<String> rules) {
+        String rule = "RULE:";
+        String defaultRule = "DEFAULT";
+        List<String> retVal = new ArrayList<>();
+        StringBuilder currentRule = new StringBuilder();
+        for (String r : rules) {
+            if (currentRule.length() > 0) {
+                if (r.startsWith(rule) || r.equals(defaultRule)) {
+                    retVal.add(currentRule.toString());
+                    currentRule.setLength(0);
+                    currentRule.append(r);
+                } else {
+                    currentRule.append(String.format(",%s", r));
+                }
+            } else {
+                currentRule.append(r);
+            }
         }
-
-        List<String> result = new ArrayList<>();
-        Matcher matcher = RULE_SPLITTER.matcher(sslPrincipalMappingRules.trim());
-        while (matcher.find()) {
-            result.add(matcher.group(1));
+        if (currentRule.length() > 0) {
+            retVal.add(currentRule.toString());
         }
-
-        return result;
+        return retVal;
     }
 
     private static List<Rule> parseRules(List<String> rules) {
+        rules = joinSplitRules(rules);
         List<Rule> result = new ArrayList<>();
         for (String rule : rules) {
             Matcher matcher = RULE_PARSER.matcher(rule);
@@ -65,18 +74,15 @@ public class SslPrincipalMapper {
             if (rule.length() != matcher.end()) {
                 throw new IllegalArgumentException("Invalid rule: `" + rule + "`, unmatched substring: `" + rule.substring(matcher.end()) + "`");
             }
-
-            // empty rules are ignored
-            if (matcher.group(1) != null) {
+            if (matcher.group(2) != null) {
                 result.add(new Rule());
-            } else if (matcher.group(2) != null) {
-                result.add(new Rule(matcher.group(2),
-                                    matcher.group(4),
-                                    "L".equals(matcher.group(6)),
-                                    "U".equals(matcher.group(6))));
+            } else {
+                result.add(new Rule(matcher.group(5),
+                                    matcher.group(6),
+                                    "L".equals(matcher.group(7)),
+                                    "U".equals(matcher.group(7))));
             }
         }
-
         return result;
     }
 
@@ -163,7 +169,8 @@ public class SslPrincipalMapper {
                 if (backRefNum.startsWith("0")) {
                     continue;
                 }
-                int backRefIndex = Integer.parseInt(backRefNum);
+                final int originalBackRefIndex = Integer.parseInt(backRefNum);
+                int backRefIndex = originalBackRefIndex;
 
 
                 // if we have a replacement value like $123, and we have less than 123 capturing groups, then

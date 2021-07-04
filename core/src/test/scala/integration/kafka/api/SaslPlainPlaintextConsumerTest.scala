@@ -13,13 +13,13 @@
 package kafka.api
 
 import java.io.File
-import java.util.Locale
+import java.util.{Locale, Properties}
 
 import kafka.server.KafkaConfig
 import kafka.utils.{JaasTestUtils, TestUtils}
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.junit.{After, Before, Test}
 
 class SaslPlainPlaintextConsumerTest extends BaseConsumerTest with SaslSetup {
   override protected def listenerName = new ListenerName("CLIENT")
@@ -35,24 +35,29 @@ class SaslPlainPlaintextConsumerTest extends BaseConsumerTest with SaslSetup {
   override protected val serverSaslProperties = Some(kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   override protected val clientSaslProperties = Some(kafkaClientSaslProperties(kafkaClientSaslMechanism))
 
-  @BeforeEach
+  @Before
   override def setUp(): Unit = {
     startSasl(jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), Both, kafkaServerJaasEntryName))
     super.setUp()
   }
 
-  @AfterEach
+  @After
   override def tearDown(): Unit = {
     super.tearDown()
     closeSasl()
   }
 
+  override def modifyConfigs(props: Seq[Properties]): Unit = {
+    super.modifyConfigs(props)
+    configureListeners(props)
+  }
+
   /**
-   * Checks that everyone can access ZkData.SecureZkRootPaths and ZkData.SensitiveZkRootPaths
+   * Checks that everyone can access ZkUtils.SecureZkRootPaths and ZkUtils.SensitiveZkRootPaths
    * when zookeeper.set.acl=false, even if ZooKeeper is SASL-enabled.
    */
   @Test
-  def testZkAclsDisabled(): Unit = {
+  def testZkAclsDisabled() {
     TestUtils.verifyUnsecureZkAcls(zkClient)
   }
 }

@@ -17,12 +17,12 @@
 
 package org.apache.kafka.common.utils;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.nio.ByteBuffer;
 import java.util.zip.Checksum;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.Assert.assertEquals;
 
 public class ChecksumsTest {
 
@@ -61,7 +61,7 @@ public class ChecksumsTest {
         Checksums.updateInt(crc1, value);
         crc2.update(buffer.array(), buffer.arrayOffset(), 4);
 
-        assertEquals(crc1.getValue(), crc2.getValue(), "Crc values should be the same");
+        assertEquals("Crc values should be the same", crc1.getValue(), crc2.getValue());
     }
 
     @Test
@@ -76,7 +76,7 @@ public class ChecksumsTest {
         Checksums.updateLong(crc1, value);
         crc2.update(buffer.array(), buffer.arrayOffset(), 8);
 
-        assertEquals(crc1.getValue(), crc2.getValue(), "Crc values should be the same");
+        assertEquals("Crc values should be the same", crc1.getValue(), crc2.getValue());
     }
 
     private void doTestUpdateByteBufferWithOffsetPosition(byte[] bytes, ByteBuffer buffer, int offset) {

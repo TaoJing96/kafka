@@ -16,103 +16,146 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.Serializer;
+import org.easymock.EasyMock;
 import org.junit.Test;
 
-import java.nio.ByteBuffer;
-
+import static java.util.Collections.emptyMap;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
 
 public class FullChangeSerdeTest {
-    private final FullChangeSerde<String> serde = FullChangeSerde.wrap(Serdes.String());
-
-    /**
-     * We used to serialize a Change into a single byte[]. Now, we don't anymore, but we still keep this logic here
-     * so that we can produce the legacy format to test that we can still deserialize it.
-     */
-    private static byte[] mergeChangeArraysIntoSingleLegacyFormattedArray(final Change<byte[]> serialChange) {
-        if (serialChange == null) {
-            return null;
-        }
-
-        final int oldSize = serialChange.oldValue == null ? -1 : serialChange.oldValue.length;
-        final int newSize = serialChange.newValue == null ? -1 : serialChange.newValue.length;
-
-        final ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Math.max(0, oldSize) + Math.max(0, newSize));
-
-
-        buffer.putInt(oldSize);
-        if (serialChange.oldValue != null) {
-            buffer.put(serialChange.oldValue);
-        }
-
-        buffer.putInt(newSize);
-        if (serialChange.newValue != null) {
-            buffer.put(serialChange.newValue);
-        }
-        return buffer.array();
-    }
+    private final FullChangeSerde<String> serde = FullChangeSerde.castOrWrap(Serdes.String());
 
     @Test
     public void shouldRoundTripNull() {
-        assertThat(serde.serializeParts(null, null), nullValue());
-        assertThat(mergeChangeArraysIntoSingleLegacyFormattedArray(null), nullValue());
-        assertThat(FullChangeSerde.decomposeLegacyFormattedArrayIntoChangeArrays(null), nullValue());
-        assertThat(serde.deserializeParts(null, null), nullValue());
+        final byte[] serialized = serde.serializer().serialize(null, null);
+        assertThat(
+            serde.deserializer().deserialize(null, serialized),
+            nullValue()
+        );
     }
 
 
     @Test
     public void shouldRoundTripNullChange() {
+        final byte[] serialized = serde.serializer().serialize(null, new Change<>(null, null));
         assertThat(
-            serde.serializeParts(null, new Change<>(null, null)),
-            is(new Change<byte[]>(null, null))
-        );
-
-        assertThat(
-            serde.deserializeParts(null, new Change<>(null, null)),
-            is(new Change<String>(null, null))
-        );
-
-        final byte[] legacyFormat = mergeChangeArraysIntoSingleLegacyFormattedArray(new Change<>(null, null));
-        assertThat(
-            FullChangeSerde.decomposeLegacyFormattedArrayIntoChangeArrays(legacyFormat),
-            is(new Change<byte[]>(null, null))
+            serde.deserializer().deserialize(null, serialized),
+            is(new Change<>(null, null))
         );
     }
 
     @Test
     public void shouldRoundTripOldNull() {
-        final Change<byte[]> serialized = serde.serializeParts(null, new Change<>("new", null));
-        final byte[] legacyFormat = mergeChangeArraysIntoSingleLegacyFormattedArray(serialized);
-        final Change<byte[]> decomposedLegacyFormat = FullChangeSerde.decomposeLegacyFormattedArrayIntoChangeArrays(legacyFormat);
+        final byte[] serialized = serde.serializer().serialize(null, new Change<>("new", null));
         assertThat(
-            serde.deserializeParts(null, decomposedLegacyFormat),
+            serde.deserializer().deserialize(null, serialized),
             is(new Change<>("new", null))
         );
     }
 
     @Test
     public void shouldRoundTripNewNull() {
-        final Change<byte[]> serialized = serde.serializeParts(null, new Change<>(null, "old"));
-        final byte[] legacyFormat = mergeChangeArraysIntoSingleLegacyFormattedArray(serialized);
-        final Change<byte[]> decomposedLegacyFormat = FullChangeSerde.decomposeLegacyFormattedArrayIntoChangeArrays(legacyFormat);
+        final byte[] serialized = serde.serializer().serialize(null, new Change<>(null, "old"));
         assertThat(
-            serde.deserializeParts(null, decomposedLegacyFormat),
+            serde.deserializer().deserialize(null, serialized),
             is(new Change<>(null, "old"))
         );
     }
 
     @Test
     public void shouldRoundTripChange() {
-        final Change<byte[]> serialized = serde.serializeParts(null, new Change<>("new", "old"));
-        final byte[] legacyFormat = mergeChangeArraysIntoSingleLegacyFormattedArray(serialized);
-        final Change<byte[]> decomposedLegacyFormat = FullChangeSerde.decomposeLegacyFormattedArrayIntoChangeArrays(legacyFormat);
+        final byte[] serialized = serde.serializer().serialize(null, new Change<>("new", "old"));
         assertThat(
-            serde.deserializeParts(null, decomposedLegacyFormat),
+            serde.deserializer().deserialize(null, serialized),
             is(new Change<>("new", "old"))
         );
+    }
+
+    @Test
+    public void shouldConfigureSerde() {
+        final Serde<Void> mock = EasyMock.mock(Serde.class);
+        mock.configure(emptyMap(), false);
+        EasyMock.expectLastCall();
+        EasyMock.replay(mock);
+        final FullChangeSerde<Void> serde = FullChangeSerde.castOrWrap(mock);
+        serde.configure(emptyMap(), false);
+        EasyMock.verify(mock);
+    }
+
+    @Test
+    public void shouldCloseSerde() {
+        final Serde<Void> mock = EasyMock.mock(Serde.class);
+        mock.close();
+        EasyMock.expectLastCall();
+        EasyMock.replay(mock);
+        final FullChangeSerde<Void> serde = FullChangeSerde.castOrWrap(mock);
+        serde.close();
+        EasyMock.verify(mock);
+    }
+
+    @Test
+    public void shouldConfigureSerializer() {
+        final Serde<Void> mockSerde = EasyMock.mock(Serde.class);
+        final Serializer<Void> mockSerializer = EasyMock.mock(Serializer.class);
+        EasyMock.expect(mockSerde.serializer()).andReturn(mockSerializer);
+        EasyMock.replay(mockSerde);
+        mockSerializer.configure(emptyMap(), false);
+        EasyMock.expectLastCall();
+        EasyMock.replay(mockSerializer);
+        final Serializer<Change<Void>> serializer = FullChangeSerde.castOrWrap(mockSerde).serializer();
+        serializer.configure(emptyMap(), false);
+        EasyMock.verify(mockSerde);
+        EasyMock.verify(mockSerializer);
+    }
+
+    @Test
+    public void shouldCloseSerializer() {
+        final Serde<Void> mockSerde = EasyMock.mock(Serde.class);
+        final Serializer<Void> mockSerializer = EasyMock.mock(Serializer.class);
+        EasyMock.expect(mockSerde.serializer()).andReturn(mockSerializer);
+        EasyMock.replay(mockSerde);
+        mockSerializer.close();
+        EasyMock.expectLastCall();
+        EasyMock.replay(mockSerializer);
+        final Serializer<Change<Void>> serializer = FullChangeSerde.castOrWrap(mockSerde).serializer();
+        serializer.close();
+        EasyMock.verify(mockSerde);
+        EasyMock.verify(mockSerializer);
+    }
+
+    @Test
+    public void shouldConfigureDeserializer() {
+        final Serde<Void> mockSerde = EasyMock.mock(Serde.class);
+        final Deserializer<Void> mockDeserializer = EasyMock.mock(Deserializer.class);
+        EasyMock.expect(mockSerde.deserializer()).andReturn(mockDeserializer);
+        EasyMock.replay(mockSerde);
+        mockDeserializer.configure(emptyMap(), false);
+        EasyMock.expectLastCall();
+        EasyMock.replay(mockDeserializer);
+        final Deserializer<Change<Void>> serializer = FullChangeSerde.castOrWrap(mockSerde).deserializer();
+        serializer.configure(emptyMap(), false);
+        EasyMock.verify(mockSerde);
+        EasyMock.verify(mockDeserializer);
+    }
+
+    @Test
+    public void shouldCloseDeserializer() {
+        final Serde<Void> mockSerde = EasyMock.mock(Serde.class);
+        final Deserializer<Void> mockDeserializer = EasyMock.mock(Deserializer.class);
+        EasyMock.expect(mockSerde.deserializer()).andReturn(mockDeserializer);
+        EasyMock.replay(mockSerde);
+        mockDeserializer.close();
+        EasyMock.expectLastCall();
+        EasyMock.replay(mockDeserializer);
+        final Deserializer<Change<Void>> serializer = FullChangeSerde.castOrWrap(mockSerde).deserializer();
+        serializer.close();
+        EasyMock.verify(mockSerde);
+        EasyMock.verify(mockDeserializer);
     }
 }

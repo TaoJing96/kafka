@@ -25,7 +25,6 @@ from ducktape.services.service import Service
 from ducktape.utils.util import wait_until
 
 from kafkatest.directory_layout.kafka_path import KafkaPathResolverMixin
-from kafkatest.services.kafka.util import fix_opts_for_new_jvm
 
 
 class ConnectServiceBase(KafkaPathResolverMixin, Service):
@@ -217,9 +216,6 @@ class ConnectServiceBase(KafkaPathResolverMixin, Service):
     def restart_connector(self, name, node=None, **kwargs):
         return self._rest_with_retry('/connectors/' + name + '/restart', node=node, method="POST", **kwargs)
 
-    def restart_connector_and_tasks(self, name, only_failed, include_tasks, node=None, **kwargs):
-        return self._rest_with_retry('/connectors/' + name + '/restart?onlyFailed=' + only_failed + '&includeTasks=' + include_tasks, node=node, method="POST", **kwargs)
-
     def restart_task(self, connector_name, task_id, node=None):
         return self._rest('/connectors/' + connector_name + '/tasks/' + str(task_id) + '/restart', node=node, method="POST")
 
@@ -296,8 +292,6 @@ class ConnectStandaloneService(ConnectServiceBase):
         heap_kafka_opts = "-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=%s" % \
                           self.logs["connect_heap_dump_file"]["path"]
         other_kafka_opts = self.security_config.kafka_opts.strip('\"')
-
-        cmd += fix_opts_for_new_jvm(node)
         cmd += "export KAFKA_OPTS=\"%s %s\"; " % (heap_kafka_opts, other_kafka_opts)
         for envvar in self.environment:
             cmd += "export %s=%s; " % (envvar, str(self.environment[envvar]))
@@ -441,10 +435,10 @@ class VerifiableSource(VerifiableConnector):
         self.throughput = throughput
 
     def committed_messages(self):
-        return list(filter(lambda m: 'committed' in m and m['committed'], self.messages()))
+        return filter(lambda m: 'committed' in m and m['committed'], self.messages())
 
     def sent_messages(self):
-        return list(filter(lambda m: 'committed' not in m or not m['committed'], self.messages()))
+        return filter(lambda m: 'committed' not in m or not m['committed'], self.messages())
 
     def start(self):
         self.logger.info("Creating connector VerifiableSourceConnector %s", self.name)
@@ -470,10 +464,10 @@ class VerifiableSink(VerifiableConnector):
         self.topics = topics
 
     def flushed_messages(self):
-        return list(filter(lambda m: 'flushed' in m and m['flushed'], self.messages()))
+        return filter(lambda m: 'flushed' in m and m['flushed'], self.messages())
 
     def received_messages(self):
-        return list(filter(lambda m: 'flushed' not in m or not m['flushed'], self.messages()))
+        return filter(lambda m: 'flushed' not in m or not m['flushed'], self.messages())
 
     def start(self):
         self.logger.info("Creating connector VerifiableSinkConnector %s", self.name)

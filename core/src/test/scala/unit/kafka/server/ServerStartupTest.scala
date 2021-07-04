@@ -20,17 +20,17 @@ package kafka.server
 import kafka.utils.TestUtils
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.KafkaException
-import org.apache.kafka.metadata.BrokerState
 import org.apache.zookeeper.KeeperException.NodeExistsException
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, Test}
+import org.easymock.EasyMock
+import org.junit.Assert._
+import org.junit.{After, Test}
 
 class ServerStartupTest extends ZooKeeperTestHarness {
 
   private var server: KafkaServer = null
 
-  @AfterEach
-  override def tearDown(): Unit = {
+  @After
+  override def tearDown() {
     if (server != null)
       TestUtils.shutdownServers(Seq(server))
     super.tearDown()
@@ -42,7 +42,7 @@ class ServerStartupTest extends ZooKeeperTestHarness {
     val zookeeperChroot = "/kafka-chroot-for-unittest"
     val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
     val zooKeeperConnect = props.get("zookeeper.connect")
-    props.put("zookeeper.connect", zooKeeperConnect.toString + zookeeperChroot)
+    props.put("zookeeper.connect", zooKeeperConnect + zookeeperChroot)
     server = TestUtils.createServer(KafkaConfig.fromProps(props))
 
     val pathExists = zkClient.pathExists(zookeeperChroot)
@@ -60,7 +60,12 @@ class ServerStartupTest extends ZooKeeperTestHarness {
     // Create a second broker with same port
     val brokerId2 = 1
     val props2 = TestUtils.createBrokerConfig(brokerId2, zkConnect, port = port)
-    assertThrows(classOf[KafkaException], () => TestUtils.createServer(KafkaConfig.fromProps(props2)))
+    try {
+      TestUtils.createServer(KafkaConfig.fromProps(props2))
+      fail("Starting a broker with the same port should fail")
+    } catch {
+      case _: KafkaException => // expected
+    }
   }
 
   @Test
@@ -74,7 +79,13 @@ class ServerStartupTest extends ZooKeeperTestHarness {
     val brokerRegistration = zkClient.getBroker(brokerId).getOrElse(fail("broker doesn't exists"))
 
     val props2 = TestUtils.createBrokerConfig(brokerId, zkConnect)
-    assertThrows(classOf[NodeExistsException], () => TestUtils.createServer(KafkaConfig.fromProps(props2)))
+    try {
+      TestUtils.createServer(KafkaConfig.fromProps(props2))
+      fail("Registering a broker with a conflicting id should fail")
+    } catch {
+      case _: NodeExistsException =>
+      // this is expected
+    }
 
     // broker registration shouldn't change
     assertEquals(brokerRegistration, zkClient.getBroker(brokerId).getOrElse(fail("broker doesn't exists")))
@@ -86,23 +97,32 @@ class ServerStartupTest extends ZooKeeperTestHarness {
     val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
     server = TestUtils.createServer(KafkaConfig.fromProps(props))
 
-    TestUtils.waitUntilTrue(() => server.metadataCache.getAliveBrokers().nonEmpty, "Wait for cache to update")
-    assertEquals(1, server.metadataCache.getAliveBrokers().size)
-    assertEquals(brokerId, server.metadataCache.getAliveBrokers().head.id)
+    TestUtils.waitUntilTrue(() => server.metadataCache.getAliveBrokers.nonEmpty, "Wait for cache to update")
+    assertEquals(1, server.metadataCache.getAliveBrokers.size)
+    assertEquals(brokerId, server.metadataCache.getAliveBrokers.head.id)
   }
 
   @Test
   def testBrokerStateRunningAfterZK(): Unit = {
     val brokerId = 0
+    val mockBrokerState: BrokerState = EasyMock.niceMock(classOf[BrokerState])
+
+    class BrokerStateInterceptor() extends BrokerState {
+      override def newState(newState: BrokerStates): Unit = {
+        val brokers = zkClient.getAllBrokersInCluster
+        assertEquals(1, brokers.size)
+        assertEquals(brokerId, brokers.head.id)
+      }
+    }
+
+    class MockKafkaServer(override val config: KafkaConfig, override val brokerState: BrokerState = mockBrokerState) extends KafkaServer(config) {}
 
     val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
-    server = new KafkaServer(KafkaConfig.fromProps(props))
+    server = new MockKafkaServer(KafkaConfig.fromProps(props))
+
+    EasyMock.expect(mockBrokerState.newState(RunningAsBroker)).andDelegateTo(new BrokerStateInterceptor).once()
+    EasyMock.replay(mockBrokerState)
 
     server.startup()
-    TestUtils.waitUntilTrue(() => server.brokerState == BrokerState.RUNNING,
-      "waiting for the broker state to become RUNNING")
-    val brokers = zkClient.getAllBrokersInCluster
-    assertEquals(1, brokers.size)
-    assertEquals(brokerId, brokers.head.id)
   }
 }

@@ -23,7 +23,7 @@ final class TimeDefinitions {
     private TimeDefinitions() {}
 
     enum TimeDefinitionType {
-        RECORD_TIME, WINDOW_END_TIME
+        RECORD_TIME, WINDOW_END_TIME;
     }
 
     /**
@@ -35,14 +35,14 @@ final class TimeDefinitions {
         TimeDefinitionType type();
     }
 
-    public static class RecordTimeDefinition<K> implements TimeDefinition<K> {
-        private static final RecordTimeDefinition INSTANCE = new RecordTimeDefinition();
+    public static class RecordTimeDefintion<K> implements TimeDefinition<K> {
+        private static final RecordTimeDefintion INSTANCE = new RecordTimeDefintion();
 
-        private RecordTimeDefinition() {}
+        private RecordTimeDefintion() {}
 
         @SuppressWarnings("unchecked")
-        public static <K> RecordTimeDefinition<K> instance() {
-            return RecordTimeDefinition.INSTANCE;
+        public static <K> RecordTimeDefintion<K> instance() {
+            return RecordTimeDefintion.INSTANCE;
         }
 
         @Override

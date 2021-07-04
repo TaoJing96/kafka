@@ -18,13 +18,14 @@ package kafka.cluster
 
 import java.util.Properties
 
-import kafka.log.{ClientRecordDeletion, Log, LogConfig, LogManager}
-import kafka.server.{BrokerTopicStats, LogDirFailureChannel}
+import kafka.log.{Log, LogConfig, LogManager}
+import kafka.server.{BrokerTopicStats, LogDirFailureChannel, LogOffsetMetadata}
 import kafka.utils.{MockTime, TestUtils}
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.OffsetOutOfRangeException
 import org.apache.kafka.common.utils.Utils
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.junit.{After, Before, Test}
+import org.junit.Assert._
 
 class ReplicaTest {
 
@@ -33,8 +34,9 @@ class ReplicaTest {
   val time = new MockTime()
   val brokerTopicStats = new BrokerTopicStats
   var log: Log = _
+  var replica: Replica = _
 
-  @BeforeEach
+  @Before
   def setup(): Unit = {
     val logProps = new Properties()
     logProps.put(LogConfig.SegmentBytesProp, 512: java.lang.Integer)
@@ -50,12 +52,15 @@ class ReplicaTest {
       time = time,
       maxProducerIdExpirationMs = 60 * 60 * 1000,
       producerIdExpirationCheckIntervalMs = LogManager.ProducerIdExpirationCheckIntervalMs,
-      logDirFailureChannel = new LogDirFailureChannel(10),
-      topicId = None,
-      keepPartitionMetadataFile = true)
+      logDirFailureChannel = new LogDirFailureChannel(10))
+
+    replica = new Replica(brokerId = 0,
+      topicPartition = new TopicPartition("foo", 0),
+      time = time,
+      log = Some(log))
   }
 
-  @AfterEach
+  @After
   def tearDown(): Unit = {
     log.close()
     brokerTopicStats.close()
@@ -64,19 +69,25 @@ class ReplicaTest {
 
   @Test
   def testSegmentDeletionWithHighWatermarkInitialization(): Unit = {
+    val initialHighWatermark = 25L
+    replica = new Replica(brokerId = 0,
+      topicPartition = new TopicPartition("foo", 0),
+      time = time,
+      initialHighWatermarkValue = initialHighWatermark,
+      log = Some(log))
+
+    assertEquals(initialHighWatermark, replica.highWatermark.messageOffset)
+
     val expiredTimestamp = time.milliseconds() - 1000
     for (i <- 0 until 100) {
       val records = TestUtils.singletonRecords(value = s"test$i".getBytes, timestamp = expiredTimestamp)
       log.appendAsLeader(records, leaderEpoch = 0)
     }
 
-    val initialHighWatermark = log.updateHighWatermark(25L)
-    assertEquals(25L, initialHighWatermark)
-
     val initialNumSegments = log.numberOfSegments
     log.deleteOldSegments()
     assertTrue(log.numberOfSegments < initialNumSegments)
-    assertTrue(log.logStartOffset <= initialHighWatermark)
+    assertTrue(replica.logStartOffset <= initialHighWatermark)
   }
 
   @Test
@@ -89,25 +100,25 @@ class ReplicaTest {
 
     // ensure we have at least a few segments so the test case is not trivial
     assertTrue(log.numberOfSegments > 5)
-    assertEquals(0L, log.highWatermark)
-    assertEquals(0L, log.logStartOffset)
-    assertEquals(100L, log.logEndOffset)
+    assertEquals(0L, replica.highWatermark.messageOffset)
+    assertEquals(0L, replica.logStartOffset)
+    assertEquals(100L, replica.logEndOffset)
 
     for (hw <- 0 to 100) {
-      log.updateHighWatermark(hw)
-      assertEquals(hw, log.highWatermark)
+      replica.highWatermark = new LogOffsetMetadata(hw)
+      assertEquals(hw, replica.highWatermark.messageOffset)
       log.deleteOldSegments()
-      assertTrue(log.logStartOffset <= hw)
+      assertTrue(replica.logStartOffset <= hw)
 
       // verify that all segments up to the high watermark have been deleted
 
       log.logSegments.headOption.foreach { segment =>
         assertTrue(segment.baseOffset <= hw)
-        assertTrue(segment.baseOffset >= log.logStartOffset)
+        assertTrue(segment.baseOffset >= replica.logStartOffset)
       }
       log.logSegments.tail.foreach { segment =>
         assertTrue(segment.baseOffset > hw)
-        assertTrue(segment.baseOffset >= log.logStartOffset)
+        assertTrue(segment.baseOffset >= replica.logStartOffset)
       }
     }
 
@@ -116,14 +127,15 @@ class ReplicaTest {
     assertEquals(0, log.activeSegment.size)
   }
 
-  @Test
+  @Test(expected = classOf[OffsetOutOfRangeException])
   def testCannotIncrementLogStartOffsetPastHighWatermark(): Unit = {
     for (i <- 0 until 100) {
       val records = TestUtils.singletonRecords(value = s"test$i".getBytes)
       log.appendAsLeader(records, leaderEpoch = 0)
     }
 
-    log.updateHighWatermark(25L)
-    assertThrows(classOf[OffsetOutOfRangeException], () => log.maybeIncrementLogStartOffset(26L, ClientRecordDeletion))
+    replica.highWatermark = new LogOffsetMetadata(25L)
+    replica.maybeIncrementLogStartOffset(26L)
   }
+
 }

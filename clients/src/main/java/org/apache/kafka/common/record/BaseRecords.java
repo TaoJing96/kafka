@@ -30,5 +30,5 @@ public interface BaseRecords {
      * Encapsulate this {@link BaseRecords} object into {@link RecordsSend}
      * @return Initialized {@link RecordsSend} object
      */
-    RecordsSend<? extends BaseRecords> toSend();
+    RecordsSend toSend(String destination);
 }

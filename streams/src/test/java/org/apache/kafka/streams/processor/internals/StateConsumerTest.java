@@ -46,13 +46,13 @@ public class StateConsumerTest {
     private final Map<TopicPartition, Long> partitionOffsets = new HashMap<>();
     private final LogContext logContext = new LogContext("test ");
     private GlobalStreamThread.StateConsumer stateConsumer;
-    private TaskStub stateMaintainer;
+    private StateMaintainerStub stateMaintainer;
 
     @Before
     public void setUp() {
         partitionOffsets.put(topicOne, 20L);
         partitionOffsets.put(topicTwo, 30L);
-        stateMaintainer = new TaskStub(partitionOffsets);
+        stateMaintainer = new StateMaintainerStub(partitionOffsets);
         stateConsumer = new GlobalStreamThread.StateConsumer(logContext, consumer, stateMaintainer, time, Duration.ofMillis(10L), FLUSH_INTERVAL);
     }
 
@@ -110,30 +110,24 @@ public class StateConsumerTest {
 
     @Test
     public void shouldCloseConsumer() throws IOException {
-        stateConsumer.close(false);
+        stateConsumer.close();
         assertTrue(consumer.closed());
     }
 
     @Test
     public void shouldCloseStateMaintainer() throws IOException {
-        stateConsumer.close(false);
+        stateConsumer.close();
         assertTrue(stateMaintainer.closed);
     }
 
-    @Test
-    public void shouldWipeStoreOnClose() throws IOException {
-        stateConsumer.close(true);
-        assertTrue(stateMaintainer.wipeStore);
-    }
 
-    private static class TaskStub implements GlobalStateMaintainer {
+    private static class StateMaintainerStub implements GlobalStateMaintainer {
         private final Map<TopicPartition, Long> partitionOffsets;
         private final Map<TopicPartition, Integer> updatedPartitions = new HashMap<>();
         private boolean flushed;
-        private boolean wipeStore;
         private boolean closed;
 
-        TaskStub(final Map<TopicPartition, Long> partitionOffsets) {
+        StateMaintainerStub(final Map<TopicPartition, Long> partitionOffsets) {
             this.partitionOffsets = partitionOffsets;
         }
 
@@ -147,9 +141,8 @@ public class StateConsumerTest {
         }
 
         @Override
-        public void close(final boolean wipeStateStore) {
+        public void close() {
             closed = true;
-            wipeStore = wipeStateStore;
         }
 
         @Override

@@ -20,6 +20,7 @@ package kafka.coordinator.group
 import java.util
 
 import kafka.utils.nonthreadsafe
+import org.apache.kafka.common.protocol.Errors
 
 case class MemberSummary(memberId: String,
                          groupInstanceId: Option[String],
@@ -54,20 +55,21 @@ private object MemberMetadata {
  */
 @nonthreadsafe
 private[group] class MemberMetadata(var memberId: String,
+                                    val groupId: String,
                                     val groupInstanceId: Option[String],
                                     val clientId: String,
                                     val clientHost: String,
                                     val rebalanceTimeoutMs: Int,
                                     val sessionTimeoutMs: Int,
                                     val protocolType: String,
-                                    var supportedProtocols: List[(String, Array[Byte])],
-                                    var assignment: Array[Byte] = Array.empty[Byte]) {
+                                    var supportedProtocols: List[(String, Array[Byte])]) {
 
-  var awaitingJoinCallback: JoinGroupResult => Unit = _
-  var awaitingSyncCallback: SyncGroupResult => Unit = _
+  var assignment: Array[Byte] = Array.empty[Byte]
+  var awaitingJoinCallback: JoinGroupResult => Unit = null
+  var awaitingSyncCallback: SyncGroupResult => Unit = null
+  var isLeaving: Boolean = false
   var isNew: Boolean = false
-
-  def isStaticMember: Boolean = groupInstanceId.isDefined
+  val isStaticMember: Boolean = groupInstanceId.isDefined
 
   // This variable is used to track heartbeat completion through the delayed
   // heartbeat purgatory. When scheduling a new heartbeat expiration, we set
@@ -76,8 +78,8 @@ private[group] class MemberMetadata(var memberId: String,
   // delayed heartbeat can be completed.
   var heartbeatSatisfied: Boolean = false
 
-  def isAwaitingJoin: Boolean = awaitingJoinCallback != null
-  def isAwaitingSync: Boolean = awaitingSyncCallback != null
+  def isAwaitingJoin = awaitingJoinCallback != null
+  def isAwaitingSync = awaitingSyncCallback != null
 
   /**
    * Get metadata corresponding to the provided protocol.
@@ -147,7 +149,7 @@ private[group] class MemberMetadata(var memberId: String,
       s"clientHost=$clientHost, " +
       s"sessionTimeoutMs=$sessionTimeoutMs, " +
       s"rebalanceTimeoutMs=$rebalanceTimeoutMs, " +
-      s"supportedProtocols=${supportedProtocols.map(_._1)}" +
+      s"supportedProtocols=${supportedProtocols.map(_._1)}, " +
       ")"
   }
 }

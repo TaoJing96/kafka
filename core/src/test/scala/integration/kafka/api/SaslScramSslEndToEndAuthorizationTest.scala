@@ -16,46 +16,32 @@
   */
 package kafka.api
 
-import java.util.Properties
-
 import kafka.utils.JaasTestUtils
 import kafka.zk.ConfigEntityChangeNotificationZNode
-import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.security.scram.internals.ScramMechanism
-import org.apache.kafka.test.TestSslUtils
 
-import scala.jdk.CollectionConverters._
-import org.junit.jupiter.api.BeforeEach
+import scala.collection.JavaConverters._
+import org.junit.Before
 
 class SaslScramSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizationTest {
   override protected def kafkaClientSaslMechanism = "SCRAM-SHA-256"
   override protected def kafkaServerSaslMechanisms = ScramMechanism.mechanismNames.asScala.toList
-  override val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KafkaScramUser)
-  override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KafkaScramAdmin)
+  override val clientPrincipal = JaasTestUtils.KafkaScramUser
+  override val kafkaPrincipal = JaasTestUtils.KafkaScramAdmin
   private val kafkaPassword = JaasTestUtils.KafkaScramAdminPassword
 
-  override def configureSecurityBeforeServersStart(): Unit = {
+  override def configureSecurityBeforeServersStart() {
     super.configureSecurityBeforeServersStart()
     zkClient.makeSurePersistentPathExists(ConfigEntityChangeNotificationZNode.path)
     // Create broker credentials before starting brokers
-    createScramCredentials(zkConnect, kafkaPrincipal.getName, kafkaPassword)
-    TestSslUtils.convertToPemWithoutFiles(producerConfig)
-    TestSslUtils.convertToPemWithoutFiles(consumerConfig)
-    TestSslUtils.convertToPemWithoutFiles(adminClientConfig)
+    createScramCredentials(zkConnect, kafkaPrincipal, kafkaPassword)
   }
 
-  override def configureListeners(props: collection.Seq[Properties]): Unit = {
-    props.foreach(TestSslUtils.convertToPemWithoutFiles)
-    super.configureListeners(props)
-  }
-
-  override def createPrivilegedAdminClient() = createScramAdminClient(kafkaClientSaslMechanism, kafkaPrincipal.getName, kafkaPassword)
-
-  @BeforeEach
-  override def setUp(): Unit = {
+  @Before
+  override def setUp() {
     super.setUp()
     // Create client credentials after starting brokers so that dynamic credential creation is also tested
-    createScramCredentialsViaPrivilegedAdminClient(JaasTestUtils.KafkaScramUser, JaasTestUtils.KafkaScramPassword)
-    createScramCredentialsViaPrivilegedAdminClient(JaasTestUtils.KafkaScramUser2, JaasTestUtils.KafkaScramPassword2)
+    createScramCredentials(zkConnect, JaasTestUtils.KafkaScramUser, JaasTestUtils.KafkaScramPassword)
+    createScramCredentials(zkConnect, JaasTestUtils.KafkaScramUser2, JaasTestUtils.KafkaScramPassword2)
   }
 }

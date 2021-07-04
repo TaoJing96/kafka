@@ -16,14 +16,13 @@
  */
 package org.apache.kafka.connect.util;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 public class ConnectorUtilsTest {
 
@@ -60,9 +59,8 @@ public class ConnectorUtilsTest {
                 Collections.emptyList()), grouped);
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testGroupPartitionsInvalidCount() {
-        assertThrows(IllegalArgumentException.class,
-            () -> ConnectorUtils.groupPartitions(FIVE_ELEMENTS, 0));
+        ConnectorUtils.groupPartitions(FIVE_ELEMENTS, 0);
     }
 }

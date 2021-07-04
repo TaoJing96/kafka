@@ -43,15 +43,6 @@ public abstract class AbstractRecords implements Records {
         return true;
     }
 
-    public RecordBatch firstBatch() {
-        Iterator<? extends RecordBatch> iterator = batches().iterator();
-
-        if (!iterator.hasNext())
-            return null;
-
-        return iterator.next();
-    }
-
     /**
      * Get an iterator over the deep records.
      * @return An iterator over the records
@@ -62,8 +53,8 @@ public abstract class AbstractRecords implements Records {
     }
 
     @Override
-    public DefaultRecordsSend<Records> toSend() {
-        return new DefaultRecordsSend<>(this);
+    public RecordsSend toSend(String destination) {
+        return new DefaultRecordsSend(destination, this);
     }
 
     private Iterator<Record> recordsIterator() {

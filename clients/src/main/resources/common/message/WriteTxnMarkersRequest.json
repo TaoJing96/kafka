@@ -16,11 +16,8 @@
 {
   "apiKey": 27,
   "type": "request",
-  "listeners": ["zkBroker", "broker"],
   "name": "WriteTxnMarkersRequest",
-  // Version 1 enables flexible versions.
-  "validVersions": "0-1",
-  "flexibleVersions": "1+",
+  "validVersions": "0",
   "fields": [
     { "name": "Markers", "type": "[]WritableTxnMarker", "versions": "0+",
       "about": "The transaction markers to be written.", "fields": [

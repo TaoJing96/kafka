@@ -21,7 +21,7 @@ import org.apache.kafka.common.utils.AppInfoParser
 
 object VersionInfo {
 
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]) {
     System.out.println(getVersionString)
     System.exit(0)
   }

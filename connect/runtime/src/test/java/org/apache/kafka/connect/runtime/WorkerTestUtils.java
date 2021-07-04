@@ -65,7 +65,6 @@ public class WorkerTestUtils {
                                                         int taskNum) {
         return new ClusterConfigState(
                 offset,
-                null,
                 connectorTaskCounts(1, connectorNum, taskNum),
                 connectorConfigs(1, connectorNum),
                 connectorTargetStates(1, connectorNum, TargetState.STARTED),

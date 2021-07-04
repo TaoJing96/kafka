@@ -16,17 +16,18 @@
  */
 package org.apache.kafka.streams.kstream;
 
+import org.apache.kafka.streams.internals.ApiUtils;
 import org.apache.kafka.streams.kstream.internals.TimeWindow;
 import org.apache.kafka.streams.processor.TimestampExtractor;
+import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-import static java.time.Duration.ofMillis;
 import static org.apache.kafka.streams.internals.ApiUtils.prepareMillisCheckFailMsgPrefix;
-import static org.apache.kafka.streams.internals.ApiUtils.validateMillisecondDuration;
+import static org.apache.kafka.streams.kstream.internals.WindowingDefaults.DEFAULT_RETENTION_MS;
 
 /**
  * The fixed-size time-based window specifications used for aggregations.
@@ -56,6 +57,8 @@ import static org.apache.kafka.streams.internals.ApiUtils.validateMillisecondDur
  */
 public final class TimeWindows extends Windows<TimeWindow> {
 
+    private final long maintainDurationMs;
+
     /** The size of the windows in milliseconds. */
     @SuppressWarnings("WeakerAccess")
     public final long sizeMs;
@@ -66,66 +69,49 @@ public final class TimeWindows extends Windows<TimeWindow> {
      */
     @SuppressWarnings("WeakerAccess")
     public final long advanceMs;
-
     private final long graceMs;
 
-    private TimeWindows(final long sizeMs, final long advanceMs, final long graceMs) {
+    private TimeWindows(final long sizeMs, final long advanceMs, final long graceMs, final long maintainDurationMs) {
         this.sizeMs = sizeMs;
         this.advanceMs = advanceMs;
         this.graceMs = graceMs;
+        this.maintainDurationMs = maintainDurationMs;
+    }
 
+    /** Private constructor for preserving segments. Can be removed along with Windows.segments. **/
+    @Deprecated
+    private TimeWindows(final long sizeMs,
+                        final long advanceMs,
+                        final long graceMs,
+                        final long maintainDurationMs,
+                        final int segments) {
+        super(segments);
+        this.sizeMs = sizeMs;
+        this.advanceMs = advanceMs;
+        this.graceMs = graceMs;
+        this.maintainDurationMs = maintainDurationMs;
+    }
+
+    /**
+     * Return a window definition with the given window size, and with the advance interval being equal to the window
+     * size.
+     * The time interval represented by the N-th window is: {@code [N * size, N * size + size)}.
+     * <p>
+     * This provides the semantics of tumbling windows, which are fixed-sized, gap-less, non-overlapping windows.
+     * Tumbling windows are a special case of hopping windows with {@code advance == size}.
+     *
+     * @param sizeMs The size of the window in milliseconds
+     * @return a new window definition with default maintain duration of 1 day
+     * @throws IllegalArgumentException if the specified window size is zero or negative
+     * @deprecated Use {@link #of(Duration)} instead
+     */
+    @Deprecated
+    public static TimeWindows of(final long sizeMs) throws IllegalArgumentException {
         if (sizeMs <= 0) {
             throw new IllegalArgumentException("Window size (sizeMs) must be larger than zero.");
         }
-
-        if (graceMs < 0) {
-            throw new IllegalArgumentException("Grace period must not be negative.");
-        }
-    }
-
-    /**
-     * Return a window definition with the given window size, and with the advance interval being equal to the window
-     * size.
-     * The time interval represented by the N-th window is: {@code [N * size, N * size + size)}.
-     * <p>
-     * This provides the semantics of tumbling windows, which are fixed-sized, gap-less, non-overlapping windows.
-     * Tumbling windows are a special case of hopping windows with {@code advance == size}.
-     * Using the method implicitly sets the grace period to zero which means
-     * that out of order records arriving after the window end will be dropped
-     *
-     * @param size The size of the window
-     * @return a new window definition with default no grace period. Note that this means out of order records arriving after the window end will be dropped
-     * @throws IllegalArgumentException if the specified window size is zero or negative or can't be represented as {@code long milliseconds}
-     */
-    public static TimeWindows ofSizeWithNoGrace(final Duration size) throws IllegalArgumentException {
-        return ofSizeAndGrace(size, ofMillis(NO_GRACE_PERIOD));
-    }
-
-    /**
-     * Return a window definition with the given window size, and with the advance interval being equal to the window
-     * size.
-     * The time interval represented by the N-th window is: {@code [N * size, N * size + size)}.
-     * <p>
-     * This provides the semantics of tumbling windows, which are fixed-sized, gap-less, non-overlapping windows.
-     * Tumbling windows are a special case of hopping windows with {@code advance == size}.
-     * Using the method explicitly sets the grace period to the duration specified by {@code afterWindowEnd} which means
-     * that out of order records arriving after the window end will be dropped.
-     *
-     * <p>
-     * Delay is defined as (stream_time - record_timestamp).
-     *
-     * @param size The size of the window. Must be larger than zero
-     * @param afterWindowEnd The grace period to admit out-of-order events to a window. Must be non-negative.
-     * @return a TimeWindows object with the specified size and the specified grace period
-     * @throws IllegalArgumentException if {@code afterWindowEnd} is negative or can't be represented as {@code long milliseconds}
-     */
-    public static TimeWindows ofSizeAndGrace(final Duration size, final Duration afterWindowEnd)
-            throws IllegalArgumentException {
-
-        final long sizeMs = size.toMillis();
-        final long afterWindowEndMs = afterWindowEnd.toMillis();
-
-        return new TimeWindows(sizeMs, sizeMs, afterWindowEndMs);
+        // This is a static factory method, so we initialize grace and retention to the defaults.
+        return new TimeWindows(sizeMs, sizeMs, -1, DEFAULT_RETENTION_MS);
     }
 
     /**
@@ -137,16 +123,34 @@ public final class TimeWindows extends Windows<TimeWindow> {
      * Tumbling windows are a special case of hopping windows with {@code advance == size}.
      *
      * @param size The size of the window
-     * @return a new window definition without specifying the grace period (uses old default of 24 hours)
+     * @return a new window definition with default maintain duration of 1 day
      * @throws IllegalArgumentException if the specified window size is zero or negative or can't be represented as {@code long milliseconds}
-     * @deprecated since 3.0 Use {@link #ofSizeWithNoGrace(Duration)} } instead
      */
-    @Deprecated
+    @SuppressWarnings("deprecation") // removing #of(final long sizeMs) will fix this
     public static TimeWindows of(final Duration size) throws IllegalArgumentException {
         final String msgPrefix = prepareMillisCheckFailMsgPrefix(size, "size");
-        final long sizeMs = validateMillisecondDuration(size, msgPrefix);
+        return of(ApiUtils.validateMillisecondDuration(size, msgPrefix));
+    }
 
-        return new TimeWindows(sizeMs, sizeMs, DEPRECATED_OLD_24_HR_GRACE_PERIOD);
+    /**
+     * Return a window definition with the original size, but advance ("hop") the window by the given interval, which
+     * specifies by how much a window moves forward relative to the previous one.
+     * The time interval represented by the N-th window is: {@code [N * advance, N * advance + size)}.
+     * <p>
+     * This provides the semantics of hopping windows, which are fixed-sized, overlapping windows.
+     *
+     * @param advanceMs The advance interval ("hop") in milliseconds of the window, with the requirement that {@code 0 < advanceMs <= sizeMs}.
+     * @return a new window definition with default maintain duration of 1 day
+     * @throws IllegalArgumentException if the advance interval is negative, zero, or larger than the window size
+     * @deprecated Use {@link #advanceBy(Duration)} instead
+     */
+    @Deprecated
+    public TimeWindows advanceBy(final long advanceMs) {
+        if (advanceMs <= 0 || advanceMs > sizeMs) {
+            throw new IllegalArgumentException(String.format("Window advancement interval should be more than zero " +
+                    "and less than window duration which is %d ms, but given advancement interval is: %d ms", sizeMs, advanceMs));
+        }
+        return new TimeWindows(sizeMs, advanceMs, graceMs, maintainDurationMs, segments);
     }
 
     /**
@@ -160,14 +164,10 @@ public final class TimeWindows extends Windows<TimeWindow> {
      * @return a new window definition with default maintain duration of 1 day
      * @throws IllegalArgumentException if the advance interval is negative, zero, or larger than the window size
      */
+    @SuppressWarnings("deprecation") // removing #advanceBy(final long advanceMs) will fix this
     public TimeWindows advanceBy(final Duration advance) {
         final String msgPrefix = prepareMillisCheckFailMsgPrefix(advance, "advance");
-        final long advanceMs = validateMillisecondDuration(advance, msgPrefix);
-        if (advanceMs <= 0 || advanceMs > sizeMs) {
-            throw new IllegalArgumentException(String.format("Window advancement interval should be more than zero " +
-                    "and less than window duration which is %d ms, but given advancement interval is: %d ms", sizeMs, advanceMs));
-        }
-        return new TimeWindows(sizeMs, advanceMs, graceMs);
+        return advanceBy(ApiUtils.validateMillisecondDuration(advance, msgPrefix));
     }
 
     @Override
@@ -188,32 +188,67 @@ public final class TimeWindows extends Windows<TimeWindow> {
     }
 
     /**
-     * Reject out-of-order events that arrive more than {@code millisAfterWindowEnd}
+     * Reject late events that arrive more than {@code millisAfterWindowEnd}
      * after the end of its window.
-     * <p>
-     * Delay is defined as (stream_time - record_timestamp).
      *
-     * @param afterWindowEnd The grace period to admit out-of-order events to a window.
+     * Lateness is defined as (stream_time - record_timestamp).
+     *
+     * @param afterWindowEnd The grace period to admit late-arriving events to a window.
      * @return this updated builder
      * @throws IllegalArgumentException if {@code afterWindowEnd} is negative or can't be represented as {@code long milliseconds}
-     * @deprecated since 3.0 Use {@link #ofSizeAndGrace(Duration, Duration)} instead
      */
-    @Deprecated
+    @SuppressWarnings("deprecation") // will be fixed when we remove segments from Windows
     public TimeWindows grace(final Duration afterWindowEnd) throws IllegalArgumentException {
         final String msgPrefix = prepareMillisCheckFailMsgPrefix(afterWindowEnd, "afterWindowEnd");
-        final long afterWindowEndMs = validateMillisecondDuration(afterWindowEnd, msgPrefix);
+        final long afterWindowEndMs = ApiUtils.validateMillisecondDuration(afterWindowEnd, msgPrefix);
         if (afterWindowEndMs < 0) {
             throw new IllegalArgumentException("Grace period must not be negative.");
         }
 
-        return new TimeWindows(sizeMs, advanceMs, afterWindowEndMs);
+        return new TimeWindows(sizeMs, advanceMs, afterWindowEndMs, maintainDurationMs, segments);
     }
 
+    @SuppressWarnings("deprecation") // continuing to support Windows#maintainMs/segmentInterval in fallback mode
     @Override
     public long gracePeriodMs() {
-        return graceMs;
+        // NOTE: in the future, when we remove maintainMs,
+        // we should default the grace period to 24h to maintain the default behavior,
+        // or we can default to (24h - size) if you want to be super accurate.
+        return graceMs != -1 ? graceMs : maintainMs() - size();
     }
 
+    /**
+     * @param durationMs the window retention time
+     * @return itself
+     * @throws IllegalArgumentException if {@code duration} is smaller than the window size
+     *
+     * @deprecated since 2.1. Use {@link Materialized#retention} or directly configure the retention in a store supplier
+     *             and use {@link Materialized#as(WindowBytesStoreSupplier)}.
+     */
+    @Override
+    @Deprecated
+    public TimeWindows until(final long durationMs) throws IllegalArgumentException {
+        if (durationMs < sizeMs) {
+            throw new IllegalArgumentException("Window retention time (durationMs) cannot be smaller than the window size.");
+        }
+        return new TimeWindows(sizeMs, advanceMs, graceMs, durationMs, segments);
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * For {@code TimeWindows} the maintain duration is at least as small as the window size.
+     *
+     * @return the window maintain duration
+     * @deprecated since 2.1. Use {@link Materialized#retention} instead.
+     */
+    @Override
+    @Deprecated
+    public long maintainMs() {
+        return Math.max(maintainDurationMs, sizeMs);
+    }
+
+    @SuppressWarnings("deprecation") // removing segments from Windows will fix this
     @Override
     public boolean equals(final Object o) {
         if (this == o) {
@@ -223,22 +258,28 @@ public final class TimeWindows extends Windows<TimeWindow> {
             return false;
         }
         final TimeWindows that = (TimeWindows) o;
-        return sizeMs == that.sizeMs &&
+        return maintainDurationMs == that.maintainDurationMs &&
+            segments == that.segments &&
+            sizeMs == that.sizeMs &&
             advanceMs == that.advanceMs &&
             graceMs == that.graceMs;
     }
 
+    @SuppressWarnings("deprecation") // removing segments from Windows will fix this
     @Override
     public int hashCode() {
-        return Objects.hash(sizeMs, advanceMs, graceMs);
+        return Objects.hash(maintainDurationMs, segments, sizeMs, advanceMs, graceMs);
     }
 
+    @SuppressWarnings("deprecation") // removing segments from Windows will fix this
     @Override
     public String toString() {
         return "TimeWindows{" +
+            "maintainDurationMs=" + maintainDurationMs +
             ", sizeMs=" + sizeMs +
             ", advanceMs=" + advanceMs +
             ", graceMs=" + graceMs +
+            ", segments=" + segments +
             '}';
     }
 }

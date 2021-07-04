@@ -24,7 +24,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Predicate;
-import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.junit.Test;
@@ -36,11 +36,11 @@ import static org.junit.Assert.assertEquals;
 public class KStreamFilterTest {
 
     private final String topicName = "topic";
+    private final ConsumerRecordFactory<Integer, String> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
 
     private final Predicate<Integer, String> isMultipleOfThree = (key, value) -> (key % 3) == 0;
 
-    @SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
     @Test
     public void testFilter() {
         final StreamsBuilder builder = new StreamsBuilder();
@@ -53,16 +53,14 @@ public class KStreamFilterTest {
         stream.filter(isMultipleOfThree).process(supplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<Integer, String> inputTopic = driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer());
             for (final int expectedKey : expectedKeys) {
-                inputTopic.pipeInput(expectedKey, "V" + expectedKey);
+                driver.pipeInput(recordFactory.create(topicName, expectedKey, "V" + expectedKey));
             }
         }
 
-        assertEquals(2, supplier.theCapturedProcessor().processed().size());
+        assertEquals(2, supplier.theCapturedProcessor().processed.size());
     }
 
-    @SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
     @Test
     public void testFilterNot() {
         final StreamsBuilder builder = new StreamsBuilder();
@@ -76,12 +74,11 @@ public class KStreamFilterTest {
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             for (final int expectedKey : expectedKeys) {
-                final TestInputTopic<Integer, String> inputTopic = driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer());
-                inputTopic.pipeInput(expectedKey, "V" + expectedKey);
+                driver.pipeInput(recordFactory.create(topicName, expectedKey, "V" + expectedKey));
             }
         }
 
-        assertEquals(5, supplier.theCapturedProcessor().processed().size());
+        assertEquals(5, supplier.theCapturedProcessor().processed.size());
     }
 
     @Test

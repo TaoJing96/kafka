@@ -35,10 +35,9 @@ class MergedSortedCacheWindowStoreKeyValueIterator
         final KeyValueIterator<Windowed<Bytes>, byte[]> underlyingIterator,
         final StateSerdes<Bytes, byte[]> serdes,
         final long windowSize,
-        final SegmentedCacheFunction cacheFunction,
-        final boolean forward
+        final SegmentedCacheFunction cacheFunction
     ) {
-        super(filteredCacheIterator, underlyingIterator, forward);
+        super(filteredCacheIterator, underlyingIterator);
         this.serdes = serdes;
         this.windowSize = windowSize;
         this.cacheFunction = cacheFunction;

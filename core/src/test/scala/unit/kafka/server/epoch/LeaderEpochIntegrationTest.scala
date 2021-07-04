@@ -16,30 +16,26 @@
   */
 package kafka.server.epoch
 
-import kafka.cluster.BrokerEndPoint
+import java.util.Optional
+
 import kafka.server.KafkaConfig._
 import kafka.server.{BlockingSend, KafkaServer, ReplicaFetcherBlockingSend}
-import kafka.utils.Implicits._
 import kafka.utils.TestUtils._
 import kafka.utils.{Logging, TestUtils}
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.protocol.Errors._
+import org.apache.kafka.common.requests.EpochEndOffset._
 import org.apache.kafka.common.serialization.StringSerializer
 import org.apache.kafka.common.utils.{LogContext, SystemTime}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.message.OffsetForLeaderEpochRequestData.OffsetForLeaderPartition
-import org.apache.kafka.common.message.OffsetForLeaderEpochRequestData.OffsetForLeaderTopic
-import org.apache.kafka.common.message.OffsetForLeaderEpochRequestData.OffsetForLeaderTopicCollection
-import org.apache.kafka.common.message.OffsetForLeaderEpochResponseData.EpochEndOffset
 import org.apache.kafka.common.protocol.ApiKeys
-import org.apache.kafka.common.requests.{OffsetsForLeaderEpochRequest, OffsetsForLeaderEpochResponse}
-import org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.UNDEFINED_EPOCH_OFFSET
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, Test}
+import org.junit.Assert._
+import org.junit.{After, Test}
+import org.apache.kafka.common.requests.{EpochEndOffset, OffsetsForLeaderEpochRequest, OffsetsForLeaderEpochResponse}
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.Map
 import scala.collection.mutable.ListBuffer
 
@@ -55,8 +51,8 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
   val tp = t1p0
   var producer: KafkaProducer[Array[Byte], Array[Byte]] = null
 
-  @AfterEach
-  override def tearDown(): Unit = {
+  @After
+  override def tearDown() {
     if (producer != null)
       producer.close()
     TestUtils.shutdownServers(brokers)
@@ -64,7 +60,7 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
   }
 
   @Test
-  def shouldAddCurrentLeaderEpochToMessagesAsTheyAreWrittenToLeader(): Unit = {
+  def shouldAddCurrentLeaderEpochToMessagesAsTheyAreWrittenToLeader() {
     brokers ++= (0 to 1).map { id => createServer(fromProps(createBrokerConfig(id, zkConnect))) }
 
     // Given two topics with replication of a single partition
@@ -131,7 +127,8 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
     assertEquals(30, offsetsForEpochs(t2p0).endOffset)
 
     //And should get no leader for partition error from t1p1 (as it's not on broker 0)
-    assertEquals(NOT_LEADER_OR_FOLLOWER.code, offsetsForEpochs(t1p1).errorCode)
+    assertTrue(offsetsForEpochs(t1p1).hasError)
+    assertEquals(NOT_LEADER_FOR_PARTITION, offsetsForEpochs(t1p1).error)
     assertEquals(UNDEFINED_EPOCH_OFFSET, offsetsForEpochs(t1p1).endOffset)
 
     //Repointing to broker 1 we should get the correct offset for t1p1
@@ -148,7 +145,7 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
 
     brokers += createServer(fromProps(createBrokerConfig(101, zkConnect)))
 
-    def leo() = brokers(1).replicaManager.localLog(tp).get.logEndOffset
+    def leo() = brokers(1).replicaManager.localReplica(tp).get.logEndOffset
 
     TestUtils.createTopic(zkClient, tp.topic, Map(tp.partition -> Seq(101)), brokers)
     producer = createProducer(getBrokerListStrFromServers(brokers), acks = -1)
@@ -228,15 +225,16 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
   }
 
   private def sender(from: KafkaServer, to: KafkaServer): BlockingSend = {
-    val node = from.metadataCache.getAliveBrokerNode(to.config.brokerId,
-      from.config.interBrokerListenerName).get
-    val endPoint = new BrokerEndPoint(node.id(), node.host(), node.port())
+    val endPoint = from.metadataCache.getAliveBrokers.find(_.id == to.config.brokerId).get.brokerEndPoint(from.config.interBrokerListenerName)
     new ReplicaFetcherBlockingSend(endPoint, from.config, new Metrics(), new SystemTime(), 42, "TestFetcher", new LogContext())
   }
 
   private def waitForEpochChangeTo(topic: String, partition: Int, epoch: Int): Unit = {
     TestUtils.waitUntilTrue(() => {
-      brokers(0).metadataCache.getPartitionInfo(topic, partition).exists(_.leaderEpoch == epoch)
+      brokers(0).metadataCache.getPartitionInfo(topic, partition) match {
+        case Some(m) => m.basePartitionState.leaderEpoch == epoch
+        case None => false
+      }
     }, "Epoch didn't change")
   }
 
@@ -244,13 +242,13 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
     var result = true
     for (topic <- List(topic1, topic2)) {
       val tp = new TopicPartition(topic, 0)
-      val leo = broker.getLogManager.getLog(tp).get.logEndOffset
+      val leo = broker.getLogManager().getLog(tp).get.logEndOffset
       result = result && leo > 0 && brokers.forall { broker =>
-        broker.getLogManager.getLog(tp).get.logSegments.iterator.forall { segment =>
-          if (segment.read(minOffset, Integer.MAX_VALUE) == null) {
+        broker.getLogManager().getLog(tp).get.logSegments.iterator.forall { segment =>
+          if (segment.read(minOffset, None, Integer.MAX_VALUE) == null) {
             false
           } else {
-            segment.read(minOffset, Integer.MAX_VALUE)
+            segment.read(minOffset, None, Integer.MAX_VALUE)
               .records.batches().iterator().asScala.forall(
               expectedLeaderEpoch == _.partitionLeaderEpoch()
             )
@@ -279,26 +277,14 @@ class LeaderEpochIntegrationTest extends ZooKeeperTestHarness with Logging {
   private[epoch] class TestFetcherThread(sender: BlockingSend) extends Logging {
 
     def leaderOffsetsFor(partitions: Map[TopicPartition, Int]): Map[TopicPartition, EpochEndOffset] = {
-      val topics = new OffsetForLeaderTopicCollection(partitions.size)
-      partitions.forKeyValue { (topicPartition, leaderEpoch) =>
-        var topic = topics.find(topicPartition.topic)
-        if (topic == null) {
-          topic = new OffsetForLeaderTopic().setTopic(topicPartition.topic)
-          topics.add(topic)
-        }
-        topic.partitions.add(new OffsetForLeaderPartition()
-          .setPartition(topicPartition.partition)
-          .setLeaderEpoch(leaderEpoch))
-      }
+      val partitionData = partitions.mapValues(
+        new OffsetsForLeaderEpochRequest.PartitionData(Optional.empty(), _))
 
       val request = OffsetsForLeaderEpochRequest.Builder.forFollower(
-        ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion, topics, 1)
+        ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion, partitionData.asJava, 1)
       val response = sender.sendRequest(request)
-      response.responseBody.asInstanceOf[OffsetsForLeaderEpochResponse].data.topics.asScala.flatMap { topic =>
-        topic.partitions.asScala.map { partition =>
-          new TopicPartition(topic.topic, partition.partition) -> partition
-        }
-      }.toMap
+      response.responseBody.asInstanceOf[OffsetsForLeaderEpochResponse].responses.asScala
     }
+
   }
 }

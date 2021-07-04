@@ -14,10 +14,9 @@
 # limitations under the License.
 
 import json
-from ducktape.mark import matrix
-from ducktape.mark.resource import cluster
+from ducktape.mark import parametrize
 from ducktape.tests.test import Test
-from kafkatest.services.kafka import KafkaService, quorum
+from kafkatest.services.kafka import KafkaService
 from kafkatest.services.trogdor.produce_bench_workload import ProduceBenchWorkloadService, ProduceBenchWorkloadSpec
 from kafkatest.services.trogdor.consume_bench_workload import ConsumeBenchWorkloadService, ConsumeBenchWorkloadSpec
 from kafkatest.services.trogdor.task_spec import TaskSpec
@@ -29,7 +28,7 @@ class ConsumeBenchTest(Test):
     def __init__(self, test_context):
         """:type test_context: ducktape.tests.test.TestContext"""
         super(ConsumeBenchTest, self).__init__(test_context)
-        self.zk = ZookeeperService(test_context, num_nodes=3) if quorum.for_test(test_context) == quorum.zk else None
+        self.zk = ZookeeperService(test_context, num_nodes=3)
         self.kafka = KafkaService(test_context, num_nodes=3, zk=self.zk)
         self.producer_workload_service = ProduceBenchWorkloadService(test_context, self.kafka)
         self.consumer_workload_service = ConsumeBenchWorkloadService(test_context, self.kafka)
@@ -42,15 +41,13 @@ class ConsumeBenchTest(Test):
 
     def setUp(self):
         self.trogdor.start()
-        if self.zk:
-            self.zk.start()
+        self.zk.start()
         self.kafka.start()
 
     def teardown(self):
         self.trogdor.stop()
         self.kafka.stop()
-        if self.zk:
-            self.zk.stop()
+        self.zk.stop()
 
     def produce_messages(self, topics, max_messages=10000):
         produce_spec = ProduceBenchWorkloadSpec(0, TaskSpec.MAX_DURATION_MS,
@@ -67,10 +64,9 @@ class ConsumeBenchTest(Test):
         produce_workload.wait_for_done(timeout_sec=180)
         self.logger.debug("Produce workload finished")
 
-    @cluster(num_nodes=10)
-    @matrix(topics=[["consume_bench_topic[0-5]"]], metadata_quorum=quorum.all_non_upgrade) # topic subscription
-    @matrix(topics=[["consume_bench_topic[0-5]:[0-4]"]], metadata_quorum=quorum.all_non_upgrade)  # manual topic assignment
-    def test_consume_bench(self, topics, metadata_quorum=quorum.zk):
+    @parametrize(topics=["consume_bench_topic[0-5]"]) # topic subscription
+    @parametrize(topics=["consume_bench_topic[0-5]:[0-4]"])  # manual topic assignment
+    def test_consume_bench(self, topics):
         """
         Runs a ConsumeBench workload to consume messages
         """
@@ -90,9 +86,7 @@ class ConsumeBenchTest(Test):
         tasks = self.trogdor.tasks()
         self.logger.info("TASKS: %s\n" % json.dumps(tasks, sort_keys=True, indent=2))
 
-    @cluster(num_nodes=10)
-    @matrix(metadata_quorum=quorum.all_non_upgrade)
-    def test_single_partition(self, metadata_quorum=quorum.zk):
+    def test_single_partition(self):
         """
         Run a ConsumeBench against a single partition
         """
@@ -113,9 +107,7 @@ class ConsumeBenchTest(Test):
         tasks = self.trogdor.tasks()
         self.logger.info("TASKS: %s\n" % json.dumps(tasks, sort_keys=True, indent=2))
 
-    @cluster(num_nodes=10)
-    @matrix(metadata_quorum=quorum.all_non_upgrade)
-    def test_multiple_consumers_random_group_topics(self, metadata_quorum=quorum.zk):
+    def test_multiple_consumers_random_group_topics(self):
         """
         Runs multiple consumers group to read messages from topics.
         Since a consumerGroup isn't specified, each consumer should read from all topics independently
@@ -137,9 +129,7 @@ class ConsumeBenchTest(Test):
         tasks = self.trogdor.tasks()
         self.logger.info("TASKS: %s\n" % json.dumps(tasks, sort_keys=True, indent=2))
 
-    @cluster(num_nodes=10)
-    @matrix(metadata_quorum=quorum.all_non_upgrade)
-    def test_two_consumers_specified_group_topics(self, metadata_quorum=quorum.zk):
+    def test_two_consumers_specified_group_topics(self):
         """
         Runs two consumers in the same consumer group to read messages from topics.
         Since a consumerGroup is specified, each consumer should dynamically get assigned a partition from group
@@ -162,9 +152,7 @@ class ConsumeBenchTest(Test):
         tasks = self.trogdor.tasks()
         self.logger.info("TASKS: %s\n" % json.dumps(tasks, sort_keys=True, indent=2))
 
-    @cluster(num_nodes=10)
-    @matrix(metadata_quorum=quorum.all_non_upgrade)
-    def test_multiple_consumers_random_group_partitions(self, metadata_quorum=quorum.zk):
+    def test_multiple_consumers_random_group_partitions(self):
         """
         Runs multiple consumers in to read messages from specific partitions.
         Since a consumerGroup isn't specified, each consumer will get assigned a random group
@@ -187,9 +175,7 @@ class ConsumeBenchTest(Test):
         tasks = self.trogdor.tasks()
         self.logger.info("TASKS: %s\n" % json.dumps(tasks, sort_keys=True, indent=2))
 
-    @cluster(num_nodes=10)
-    @matrix(metadata_quorum=quorum.all_non_upgrade)
-    def test_multiple_consumers_specified_group_partitions_should_raise(self, metadata_quorum=quorum.zk):
+    def test_multiple_consumers_specified_group_partitions_should_raise(self):
         """
         Runs multiple consumers in the same group to read messages from specific partitions.
         It is an invalid configuration to provide a consumer group and specific partitions.

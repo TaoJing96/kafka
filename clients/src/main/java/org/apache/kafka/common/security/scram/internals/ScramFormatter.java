@@ -63,7 +63,7 @@ public class ScramFormatter {
         return messageDigest.digest(str);
     }
 
-    public static byte[] xor(byte[] first, byte[] second) {
+    public byte[] xor(byte[] first, byte[] second) {
         if (first.length != second.length)
             throw new IllegalArgumentException("Argument arrays must be of the same length");
         byte[] result = new byte[first.length];
@@ -86,7 +86,7 @@ public class ScramFormatter {
         return result;
     }
 
-    public static byte[] normalize(String str) {
+    public byte[] normalize(String str) {
         return toBytes(str);
     }
 
@@ -102,12 +102,12 @@ public class ScramFormatter {
         return hash(clientKey);
     }
 
-    public static String saslName(String username) {
+    public String saslName(String username) {
         String replace1 = EQUAL.matcher(username).replaceAll(Matcher.quoteReplacement("=3D"));
         return COMMA.matcher(replace1).replaceAll(Matcher.quoteReplacement("=2C"));
     }
 
-    public static String username(String saslName) {
+    public String username(String saslName) {
         String username = EQUAL_TWO_C.matcher(saslName).replaceAll(Matcher.quoteReplacement(","));
         if (EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("")).indexOf('=') >= 0) {
             throw new IllegalArgumentException("Invalid username: " + saslName);
@@ -115,7 +115,7 @@ public class ScramFormatter {
         return EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("="));
     }
 
-    public static String authMessage(String clientFirstMessageBare, String serverFirstMessage, String clientFinalMessageWithoutProof) {
+    public String authMessage(String clientFirstMessageBare, String serverFirstMessage, String clientFinalMessageWithoutProof) {
         return clientFirstMessageBare + "," + serverFirstMessage + "," + clientFinalMessageWithoutProof;
     }
 
@@ -151,22 +151,14 @@ public class ScramFormatter {
     }
 
     public String secureRandomString() {
-        return secureRandomString(random);
-    }
-
-    public static String secureRandomString(SecureRandom random) {
         return new BigInteger(130, random).toString(Character.MAX_RADIX);
     }
 
     public byte[] secureRandomBytes() {
-        return secureRandomBytes(random);
+        return toBytes(secureRandomString());
     }
 
-    public static byte[] secureRandomBytes(SecureRandom random) {
-        return toBytes(secureRandomString(random));
-    }
-
-    public static byte[] toBytes(String str) {
+    public byte[] toBytes(String str) {
         return str.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -174,14 +166,6 @@ public class ScramFormatter {
         try {
             byte[] salt = secureRandomBytes();
             byte[] saltedPassword = saltedPassword(password, salt, iterations);
-            return generateCredential(salt, saltedPassword, iterations);
-        } catch (InvalidKeyException e) {
-            throw new KafkaException("Could not create credential", e);
-        }
-    }
-
-    public ScramCredential generateCredential(byte[] salt, byte[] saltedPassword, int iterations) {
-        try {
             byte[] clientKey = clientKey(saltedPassword);
             byte[] storedKey = storedKey(clientKey);
             byte[] serverKey = serverKey(saltedPassword);

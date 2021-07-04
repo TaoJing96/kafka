@@ -16,8 +16,9 @@
  */
 package org.apache.kafka.common;
 
+import org.apache.kafka.common.utils.Utils;
+
 import java.io.Serializable;
-import java.util.Objects;
 
 
 /**
@@ -31,7 +32,7 @@ public final class TopicPartitionReplica implements Serializable {
     private final String topic;
 
     public TopicPartitionReplica(String topic, int partition, int brokerId) {
-        this.topic = Objects.requireNonNull(topic);
+        this.topic = Utils.notNull(topic);
         this.partition = partition;
         this.brokerId = brokerId;
     }

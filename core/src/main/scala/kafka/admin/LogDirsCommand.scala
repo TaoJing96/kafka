@@ -21,10 +21,11 @@ import java.io.PrintStream
 import java.util.Properties
 
 import kafka.utils.{CommandDefaultOptions, CommandLineUtils, Json}
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, LogDirDescription}
+import org.apache.kafka.clients.admin.{AdminClientConfig, DescribeLogDirsResult, AdminClient => JAdminClient}
+import org.apache.kafka.common.requests.DescribeLogDirsResponse.LogDirInfo
 import org.apache.kafka.common.utils.Utils
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.collection.Map
 
 /**
@@ -39,33 +40,22 @@ object LogDirsCommand {
     def describe(args: Array[String], out: PrintStream): Unit = {
         val opts = new LogDirsCommandOptions(args)
         val adminClient = createAdminClient(opts)
-        try {
-            val topicList = opts.options.valueOf(opts.topicListOpt).split(",").filter(_.nonEmpty)
-            val clusterBrokers = adminClient.describeCluster().nodes().get().asScala.map(_.id()).toSet
-            val (existingBrokers, nonExistingBrokers) = Option(opts.options.valueOf(opts.brokerListOpt)) match {
-                case Some(brokerListStr) =>
-                    val inputBrokers = brokerListStr.split(',').filter(_.nonEmpty).map(_.toInt).toSet
-                    (inputBrokers.intersect(clusterBrokers), inputBrokers.diff(clusterBrokers))
-                case None => (clusterBrokers, Set.empty)
-            }
-
-            if (nonExistingBrokers.nonEmpty) {
-                out.println(s"ERROR: The given brokers do not exist from --broker-list: ${nonExistingBrokers.mkString(",")}." +
-                  s" Current existent brokers: ${clusterBrokers.mkString(",")}")
-            } else {
-                out.println("Querying brokers for log directories information")
-                val describeLogDirsResult = adminClient.describeLogDirs(existingBrokers.map(Integer.valueOf).toSeq.asJava)
-                val logDirInfosByBroker = describeLogDirsResult.allDescriptions.get().asScala.map { case (k, v) => k -> v.asScala }
-
-                out.println(s"Received log directory information from brokers ${existingBrokers.mkString(",")}")
-                out.println(formatAsJson(logDirInfosByBroker, topicList.toSet))
-            }
-        } finally {
-            adminClient.close()
+        val topicList = opts.options.valueOf(opts.topicListOpt).split(",").filter(!_.isEmpty)
+        val brokerList = Option(opts.options.valueOf(opts.brokerListOpt)) match {
+            case Some(brokerListStr) => brokerListStr.split(',').filter(!_.isEmpty).map(_.toInt)
+            case None => adminClient.describeCluster().nodes().get().asScala.map(_.id()).toArray
         }
+
+        out.println("Querying brokers for log directories information")
+        val describeLogDirsResult: DescribeLogDirsResult = adminClient.describeLogDirs(brokerList.map(Integer.valueOf).toSeq.asJava)
+        val logDirInfosByBroker = describeLogDirsResult.all.get().asScala.mapValues(_.asScala)
+
+        out.println(s"Received log directory information from brokers ${brokerList.mkString(",")}")
+        out.println(formatAsJson(logDirInfosByBroker, topicList.toSet))
+        adminClient.close()
     }
 
-    private def formatAsJson(logDirInfosByBroker: Map[Integer, Map[String, LogDirDescription]], topicSet: Set[String]): String = {
+    private def formatAsJson(logDirInfosByBroker: Map[Integer, Map[String, LogDirInfo]], topicSet: Set[String]): String = {
         Json.encodeAsString(Map(
             "version" -> 1,
             "brokers" -> logDirInfosByBroker.map { case (broker, logDirInfos) =>
@@ -74,7 +64,7 @@ object LogDirsCommand {
                     "logDirs" -> logDirInfos.map { case (logDir, logDirInfo) =>
                         Map(
                             "logDir" -> logDir,
-                            "error" -> Option(logDirInfo.error).map(ex => ex.getClass.getName).orNull,
+                            "error" -> logDirInfo.error.exceptionName(),
                             "partitions" -> logDirInfo.replicaInfos.asScala.filter { case (topicPartition, _) =>
                                 topicSet.isEmpty || topicSet.contains(topicPartition.topic)
                             }.map { case (topicPartition, replicaInfo) =>
@@ -92,14 +82,14 @@ object LogDirsCommand {
         ).asJava)
     }
 
-    private def createAdminClient(opts: LogDirsCommandOptions): Admin = {
+    private def createAdminClient(opts: LogDirsCommandOptions): JAdminClient = {
         val props = if (opts.options.has(opts.commandConfigOpt))
             Utils.loadProps(opts.options.valueOf(opts.commandConfigOpt))
         else
             new Properties()
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, opts.options.valueOf(opts.bootstrapServerOpt))
         props.putIfAbsent(AdminClientConfig.CLIENT_ID_CONFIG, "log-dirs-tool")
-        Admin.create(props)
+        JAdminClient.create(props)
     }
 
     class LogDirsCommandOptions(args: Array[String]) extends CommandDefaultOptions(args){
