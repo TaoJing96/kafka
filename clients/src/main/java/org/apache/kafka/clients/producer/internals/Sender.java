@@ -234,11 +234,13 @@ public class Sender implements Runnable {
 
     /**
      * The main run loop for the sender thread
+     * sender线程主逻辑
      */
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
 
         // main loop, runs until close is called
+        //死循环 直到sender线程被关闭
         while (running) {
             try {
                 runOnce();
@@ -331,7 +333,9 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
+        //组装批次，发送请求
         long pollTimeout = sendProducerData(currentTimeMs);
+        //处理broker的返回值
         client.poll(pollTimeout, currentTimeMs);
     }
 

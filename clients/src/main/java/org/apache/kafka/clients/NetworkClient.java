@@ -523,6 +523,7 @@ public class NetworkClient implements KafkaClient {
      *                metadata timeout
      * @param now The current time in milliseconds
      * @return The list of responses received
+     * 获取broker的返回值
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {

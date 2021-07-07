@@ -61,8 +61,8 @@ import java.util.function.Supplier;
  */
 public class Metadata implements Closeable {
     private final Logger log;
-    private final long refreshBackoffMs;
-    private final long metadataExpireMs;
+    private final long refreshBackoffMs;//
+    private final long metadataExpireMs;//元数据最大存活时间，定时重新拉取元数据
     private int updateVersion;  // bumped on every metadata response
     private int requestVersion; // bumped on every new topic addition
     private long lastRefreshMs;
@@ -70,7 +70,7 @@ public class Metadata implements Closeable {
     private KafkaException fatalException;
     private Set<String> invalidTopics;
     private Set<String> unauthorizedTopics;
-    private MetadataCache cache = MetadataCache.empty();
+    private MetadataCache cache = MetadataCache.empty();//缓存元数据信息
     private boolean needUpdate;
     private final ClusterResourceListeners clusterResourceListeners;
     private boolean isClosed;
@@ -248,7 +248,7 @@ public class Metadata implements Closeable {
         this.updateVersion += 1;
 
         String previousClusterId = cache.cluster().clusterResource().clusterId();
-
+        //解析拉取元数据返回cache信息
         this.cache = handleMetadataResponse(response, topic -> retainTopic(topic.topic(), topic.isInternal(), now));
 
         Cluster cluster = cache.cluster();
@@ -287,6 +287,7 @@ public class Metadata implements Closeable {
 
     /**
      * Transform a MetadataResponse into a new MetadataCache instance.
+     * 每次处理元数据返回新都会返回一个cache
      */
     private MetadataCache handleMetadataResponse(MetadataResponse metadataResponse,
                                                  Predicate<MetadataResponse.TopicMetadata> topicsToRetain) {
