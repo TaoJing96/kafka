@@ -511,7 +511,9 @@ public class NetworkClient implements KafkaClient {
                 request,
                 send,
                 now);
+        //请求放到队列中，这队列表示请求正在等待被发送/返回值
         this.inFlightRequests.add(inFlightRequest);
+        //send请求入队列等待发送
         selector.send(send);
     }
 
@@ -540,6 +542,7 @@ public class NetworkClient implements KafkaClient {
 
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
+            //发送网络请求
             this.selector.poll(Utils.min(timeout, metadataTimeout, defaultRequestTimeoutMs));
         } catch (IOException e) {
             log.error("Unexpected error during I/O", e);
@@ -548,7 +551,7 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
-        handleCompletedSends(responses, updatedNow);
+        handleCompletedSends(responses, updatedNow);//处理接收到的响应
         handleCompletedReceives(responses, updatedNow);
         handleDisconnections(responses, updatedNow);
         handleConnections();
@@ -832,6 +835,7 @@ public class NetworkClient implements KafkaClient {
      * @param now The current time
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
+        //从completedReceives获取返回值，completedReceives是上一层poll塞进去的
         for (NetworkReceive receive : this.selector.completedReceives()) {
             String source = receive.source();
             InFlightRequest req = inFlightRequests.completeNext(source);
@@ -846,6 +850,7 @@ public class NetworkClient implements KafkaClient {
                     parseResponse(req.header.apiKey(), responseStruct, req.header.apiVersion());
             maybeThrottle(body, req.header.apiVersion(), req.destination, now);
             if (req.isInternalRequest && body instanceof MetadataResponse)
+                //元数据请求 -> 更新元数据
                 metadataUpdater.handleCompletedMetadataResponse(req.header, now, (MetadataResponse) body);
             else if (req.isInternalRequest && body instanceof ApiVersionsResponse)
                 handleApiVersionsResponse(responses, req, now, (ApiVersionsResponse) body);
@@ -1099,6 +1104,7 @@ public class NetworkClient implements KafkaClient {
                 this.inProgressRequestVersion = requestAndVersion.requestVersion;
                 MetadataRequest.Builder metadataRequest = requestAndVersion.requestBuilder;
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node);
+                //创建元数据请求
                 sendInternalMetadataRequest(metadataRequest, nodeConnectionId, now);
                 return defaultRequestTimeoutMs;
             }

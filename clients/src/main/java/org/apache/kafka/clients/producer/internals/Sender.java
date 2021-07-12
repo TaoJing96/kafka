@@ -333,9 +333,9 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
-        //组装批次，发送请求
+        //组装批次
         long pollTimeout = sendProducerData(currentTimeMs);
-        //处理broker的返回值
+        //发送请求 处理返回值
         client.poll(pollTimeout, currentTimeMs);
     }
 

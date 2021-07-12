@@ -107,7 +107,7 @@ public class ProducerMetadata extends Metadata {
     @Override
     public synchronized void update(int requestVersion, MetadataResponse response, long now) {
         super.update(requestVersion, response, now);
-        notifyAll();
+        notifyAll();//唤醒被sender阻塞的线程
     }
 
     @Override
