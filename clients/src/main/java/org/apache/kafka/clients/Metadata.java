@@ -232,6 +232,7 @@ public class Metadata implements Closeable {
      *     {@link #newMetadataRequestAndVersion()}.
      * @param response metadata response received from the broker
      * @param now current time in milliseconds
+     * 更新元数据
      */
     public synchronized void update(int requestVersion, MetadataResponse response, long now) {
         Objects.requireNonNull(response, "Metadata response cannot be null");
@@ -248,7 +249,7 @@ public class Metadata implements Closeable {
         this.updateVersion += 1;
 
         String previousClusterId = cache.cluster().clusterResource().clusterId();
-        //解析拉取元数据返回cache信息
+        //解析拉取元数据并缓存到本地
         this.cache = handleMetadataResponse(response, topic -> retainTopic(topic.topic(), topic.isInternal(), now));
 
         Cluster cluster = cache.cluster();

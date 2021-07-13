@@ -94,6 +94,7 @@ public class ProducerMetadata extends Metadata {
     public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
         long currentTimeMs = time.milliseconds();
         long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
+        //wait阻塞
         time.waitObject(this, () -> {
             // Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
             maybeThrowFatalException();
@@ -107,7 +108,7 @@ public class ProducerMetadata extends Metadata {
     @Override
     public synchronized void update(int requestVersion, MetadataResponse response, long now) {
         super.update(requestVersion, response, now);
-        notifyAll();//唤醒被sender阻塞的线程
+        notifyAll();//唤醒被wait阻塞的线程
     }
 
     @Override

@@ -108,6 +108,7 @@ public class BufferPool {
         this.lock.lock();
         try {
             // check if we have a free buffer of the right size pooled
+            //申请内存 == 一个内存块大小相等
             if (size == poolableSize && !this.free.isEmpty())
                 return this.free.pollFirst();
 
@@ -117,7 +118,7 @@ public class BufferPool {
             if (this.nonPooledAvailableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request, but need to allocate the buffer
-                freeUp(size);
+                freeUp(size);//一直释放空闲的内存块
                 this.nonPooledAvailableMemory -= size;
             } else {
                 // we are out of memory and will have to block
@@ -128,6 +129,7 @@ public class BufferPool {
                     this.waiters.addLast(moreMemory);
                     // loop over and over until we have a buffer or have reserved
                     // enough memory to allocate one
+                    //等地内存被归还 直到可用内存大于需要分配的内存或者超时
                     while (accumulated < size) {
                         long startWaitNs = time.nanoseconds();
                         long timeNs;
@@ -182,7 +184,7 @@ public class BufferPool {
         }
 
         if (buffer == null)
-            return safeAllocateByteBuffer(size);
+            return safeAllocateByteBuffer(size);//申请失败直接allocate内存
         else
             return buffer;
     }

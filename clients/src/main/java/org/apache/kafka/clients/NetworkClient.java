@@ -525,7 +525,7 @@ public class NetworkClient implements KafkaClient {
      *                metadata timeout
      * @param now The current time in milliseconds
      * @return The list of responses received
-     * 获取broker的返回值
+     * 该函数为逻辑是: 发送客户端请求到broker + 处理返回值
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
@@ -539,7 +539,7 @@ public class NetworkClient implements KafkaClient {
             completeResponses(responses);
             return responses;
         }
-
+        //判断是否需要拉取元数据
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             //发送网络请求
@@ -551,13 +551,13 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
-        handleCompletedSends(responses, updatedNow);//处理接收到的响应
-        handleCompletedReceives(responses, updatedNow);
-        handleDisconnections(responses, updatedNow);
-        handleConnections();
-        handleInitiateApiVersionRequests(updatedNow);
-        handleTimedOutRequests(responses, updatedNow);
-        completeResponses(responses);
+        handleCompletedSends(responses, updatedNow);//处理发送成功的请求
+        handleCompletedReceives(responses, updatedNow);//处理获取到的返回值
+        handleDisconnections(responses, updatedNow);//处理网络断开的情况
+        handleConnections();//处理新建立的网络连接
+        handleInitiateApiVersionRequests(updatedNow);//处理初始化api version 请求
+        handleTimedOutRequests(responses, updatedNow);//处理超时的请求
+        completeResponses(responses);//调回调函数
 
         return responses;
     }
@@ -833,6 +833,7 @@ public class NetworkClient implements KafkaClient {
      *
      * @param responses The list of responses to update
      * @param now The current time
+     * 处理返回值
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         //从completedReceives获取返回值，completedReceives是上一层poll塞进去的
@@ -1095,16 +1096,18 @@ public class NetworkClient implements KafkaClient {
 
         /**
          * Add a metadata request to the list of sends if we can make one
+         * 生成一个拉取元数据的请求并发给broker
          */
         private long maybeUpdate(long now, Node node) {
             String nodeConnectionId = node.idString();
 
+            //判断网络是否畅通
             if (canSendRequest(nodeConnectionId, now)) {
                 Metadata.MetadataRequestAndVersion requestAndVersion = metadata.newMetadataRequestAndVersion();
                 this.inProgressRequestVersion = requestAndVersion.requestVersion;
                 MetadataRequest.Builder metadataRequest = requestAndVersion.requestBuilder;
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node);
-                //创建元数据请求
+                //发送元数据请求
                 sendInternalMetadataRequest(metadataRequest, nodeConnectionId, now);
                 return defaultRequestTimeoutMs;
             }

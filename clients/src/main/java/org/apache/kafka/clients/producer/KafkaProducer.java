@@ -869,6 +869,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Implementation of asynchronously send a record to a topic.
+     * 发送消息
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
         TopicPartition tp = null;
@@ -877,7 +878,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // first make sure the metadata for the topic is available
             ClusterAndWaitTime clusterAndWaitTime;
             try {
-                //等待元数据就绪
+                //阻塞等待元数据就绪，返回值为元数据+阻塞等待时间
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), maxBlockTimeMs);
             } catch (KafkaException e) {
                 if (metadata.isClosed())
@@ -885,7 +886,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 throw e;
             }
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
-            Cluster cluster = clusterAndWaitTime.cluster;
+            Cluster cluster = clusterAndWaitTime.cluster;//获取到的元数据集群信息 906行会用来计算消息所属分区
             byte[] serializedKey;
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.headers(), record.key());
@@ -999,7 +1000,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.trace("Requesting metadata update for topic {}.", topic);
             }
             metadata.add(topic);
-            int version = metadata.requestUpdate();
+            int version = metadata.requestUpdate();//更新metadata.needUpdate为true
             sender.wakeup();//唤醒sender线程
             try {
                 //同步等待获取元数据

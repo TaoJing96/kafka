@@ -239,6 +239,7 @@ public final class RecordAccumulator {
                 return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true);
             }
         } finally {
+            //没成功放入批次
             if (buffer != null)
                 //归还buffer
                 free.deallocate(buffer);
