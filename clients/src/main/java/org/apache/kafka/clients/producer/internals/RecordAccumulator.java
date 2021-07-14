@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.clients.ApiVersions;
@@ -75,10 +76,10 @@ public final class RecordAccumulator {
     private final int lingerMs;
     private final long retryBackoffMs;
     private final int deliveryTimeoutMs;
-    private final BufferPool free;
+    private final BufferPool free;//内存池
     private final Time time;
     private final ApiVersions apiVersions;
-    private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
+    private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;//topic+partition对应的批次队列，其实是个CopyOnWriteMap
     private final IncompleteBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Map<TopicPartition, Long> muted;
@@ -180,6 +181,7 @@ public final class RecordAccumulator {
      * @param callback The user-supplied callback to execute when the request is complete
      * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
      * 分段加锁
+     * 消息入RecordAccumulate
      */
     public RecordAppendResult append(TopicPartition tp,
                                      long timestamp,
@@ -190,12 +192,12 @@ public final class RecordAccumulator {
                                      long maxTimeToBlock) throws InterruptedException {
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
-        appendsInProgress.incrementAndGet();
+        appendsInProgress.incrementAndGet();//记录正在append的消息条数
         ByteBuffer buffer = null;
         if (headers == null) headers = Record.EMPTY_HEADERS;
         try {
             // check if we have an in-progress batch
-            //获取对应deque 不存在则创建
+            //获取topic+partition对应deque 不存在则创建
             Deque<ProducerBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
@@ -203,16 +205,17 @@ public final class RecordAccumulator {
                 //第一次走到这里appendResult = null，因为deque中还没有batch
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq);
                 if (appendResult != null)
-                    return appendResult;
+                    return appendResult;//写入成功 直接返回
             }
 
             // we don't have an in-progress record batch try to allocate a new batch
+            //创建一个新的ProducerBatch
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
             //获取批次大小，默认为16k，如果一条消息大于16k，那么kafka一个批次里面只有一条消息，也就是消息时一条一条发送的
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
             //根据批次大小申请内存
-            buffer = free.allocate(size, maxTimeToBlock);//里面有加锁逻辑
+            buffer = free.allocate(size, maxTimeToBlock);//获取buffer 内存池有空闲的buffer则直接返回 否则直接allocate内存
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
@@ -239,9 +242,8 @@ public final class RecordAccumulator {
                 return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true);
             }
         } finally {
-            //没成功放入批次
+            //没成功放入批次 则会归还内存
             if (buffer != null)
-                //归还buffer
                 free.deallocate(buffer);
             appendsInProgress.decrementAndGet();
         }
@@ -464,6 +466,7 @@ public final class RecordAccumulator {
                 } else if (!readyNodes.contains(leader) && !isMuted(part, nowMs)) {
                     ProducerBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        //满足下面条件的批次才会被发送
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;

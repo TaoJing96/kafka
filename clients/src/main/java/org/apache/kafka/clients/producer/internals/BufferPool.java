@@ -122,6 +122,7 @@ public class BufferPool {
                 this.nonPooledAvailableMemory -= size;
             } else {
                 // we are out of memory and will have to block
+                //目前可用内存 < 申请的内存 则阻塞等待内存块被归还
                 int accumulated = 0;
                 Condition moreMemory = this.lock.newCondition();
                 try {
