@@ -252,6 +252,7 @@ public class BufferPool {
             }
             Condition moreMem = this.waiters.peekFirst();
             if (moreMem != null)
+                //内存被回收 唤醒处于申请内存阻塞的线程
                 moreMem.signal();
         } finally {
             lock.unlock();
