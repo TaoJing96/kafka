@@ -49,6 +49,7 @@ public class PlaintextTransportLayer implements TransportLayer {
     public boolean finishConnect() throws IOException {
         boolean connected = socketChannel.finishConnect();
         if (connected)
+            //成功连接后取消连接事件，增加读事件，此时这个key对应的KafkaChannel可以接受到服务端的响应了
             key.interestOps(key.interestOps() & ~SelectionKey.OP_CONNECT | SelectionKey.OP_READ);
         return connected;
     }

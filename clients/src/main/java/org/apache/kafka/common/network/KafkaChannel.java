@@ -113,16 +113,16 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     private final String id;
-    private final TransportLayer transportLayer;
+    private final TransportLayer transportLayer;//封装了socketChannel
     private final Supplier<Authenticator> authenticatorCreator;
-    private Authenticator authenticator;
+    private Authenticator authenticator;//安全认证
     // Tracks accumulated network thread time. This is updated on the network thread.
     // The values are read and reset after each response is sent.
     private long networkThreadTimeNanos;
     private final int maxReceiveSize;
     private final MemoryPool memoryPool;
-    private NetworkReceive receive;
-    private Send send;
+    private NetworkReceive receive;//接收的响应
+    private Send send;//发送的请求
     // Track connection and mute state of channels to enable outstanding requests on channels to be
     // processed after the channel is disconnected.
     private boolean disconnected;
@@ -213,7 +213,7 @@ public class KafkaChannel implements AutoCloseable {
         if (socketChannel != null) {
             remoteAddress = socketChannel.getRemoteAddress();
         }
-        boolean connected = transportLayer.finishConnect();
+        boolean connected = transportLayer.finishConnect();//完成最后的网络连接
         if (connected) {
             if (ready()) {
                 state = ChannelState.READY;

@@ -446,13 +446,14 @@ public final class RecordAccumulator {
      *     <li>The accumulator has been closed</li>
      * </ul>
      * </ol>
+     * 拿到满足发送条件的消息对应的Leader所在的node
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
 
-        boolean exhausted = this.free.queued() > 0;
+        boolean exhausted = this.free.queued() > 0;//内存池内存不够 有等待申请内存的线程
         for (Map.Entry<TopicPartition, Deque<ProducerBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
             Deque<ProducerBatch> deque = entry.getValue();
@@ -462,20 +463,27 @@ public final class RecordAccumulator {
                 if (leader == null && !deque.isEmpty()) {
                     // This is a partition for which leader is not known, but messages are available to send.
                     // Note that entries are currently not removed from batches when deque is empty.
-                    unknownLeaderTopics.add(part.topic());
+                    unknownLeaderTopics.add(part.topic());//对应leader不存在，进行标识，下一次重新获取该topic的元数据信息。此时消息不会被删掉
                 } else if (!readyNodes.contains(leader) && !isMuted(part, nowMs)) {
-                    ProducerBatch batch = deque.peekFirst();
+                    ProducerBatch batch = deque.peekFirst();//拿到第一个批次
                     if (batch != null) {
                         //满足下面条件的批次才会被发送
-                        long waitedTimeMs = batch.waitedTimeMs(nowMs);
+                        long waitedTimeMs = batch.waitedTimeMs(nowMs);//等待时间
+                        //是否重试 = 重试次数 > 0 && 等待时间 < 重试时间间隔
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
+                        //这个批次发送前最大的等待时间 = 是否允许重试 ？ 重试时间间隔 : 消息发送前最大等待时间
+                        //第一次进入消息没有重试 -> backingOff=false -> timeToWaitMs = lingerMs -> 合理设置iingerMs 如果为0则是来一条消息发送一次，就不熟批量发送了
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        //对头批次是否满了
                         boolean full = deque.size() > 1 || batch.isFull();
+                        //等待时间 >= 应该等待时间
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+                        //closed -> sender线程被关闭后也应该发送 flushInProgress() -> 当前正在flush，也就是将缓存中的消息强制发送 一次flush需要清空缓存 -> 不应该手动调flush 交给kafka管理
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
                         } else {
+                            //还应该再等多久
                             long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough

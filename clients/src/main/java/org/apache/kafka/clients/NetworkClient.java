@@ -286,9 +286,10 @@ public class NetworkClient implements KafkaClient {
         if (isReady(node, now))
             return true;
 
+        //建立链接 第一次必走到这
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
-            initiateConnect(node, now);
+            initiateConnect(node, now);//初始化连接
 
         return false;
     }
@@ -423,6 +424,7 @@ public class NetworkClient implements KafkaClient {
      * @param now the current timestamp
      */
     private boolean canSendRequest(String node, long now) {
+        //连接已经建立好了 || channel就绪 || 未收到ack的消息 <= maxInFlightRequestsPerConnection(默认5 大于1可能有消息乱序)
         return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
             inFlightRequests.canSendMore(node);
     }
@@ -945,17 +947,19 @@ public class NetworkClient implements KafkaClient {
      * Initiate a connection to the given node
      * @param node the node to connect to
      * @param now current time in epoch milliseconds
+     * 初始化连接
      */
     private void initiateConnect(Node node, long now) {
         String nodeConnectionId = node.idString();
         try {
+            //更新节点状态为connecting
             connectionStates.connecting(nodeConnectionId, now, node.host(), clientDnsLookup);
             InetAddress address = connectionStates.currentAddress(nodeConnectionId);
             log.debug("Initiating connection to node {} using address {}", node, address);
             selector.connect(nodeConnectionId,
                     new InetSocketAddress(address, node.port()),
                     this.socketSendBuffer,
-                    this.socketReceiveBuffer);
+                    this.socketReceiveBuffer);//尝试与节点建立socket连接
         } catch (IOException e) {
             log.warn("Error connecting to node {}", node, e);
             /* attempt failed, we'll try again after the backoff */

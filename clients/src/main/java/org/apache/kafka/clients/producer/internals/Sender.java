@@ -342,9 +342,11 @@ public class Sender implements Runnable {
     private long sendProducerData(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        //获取就绪的node信息
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        //leader不存在 重新拉取元数据
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
             // topics which may have expired. Add the topic again to metadata to ensure it is included
@@ -362,6 +364,7 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            //去掉网络不通的leader节点 下次重新拉取元数据信息
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.pollDelayMs(node, now));
@@ -369,9 +372,11 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        //获取要发送的批次
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
+            //有序消息  也就是max.in.flight.request.per.connection=1
             // Mute all the partitions drained
             for (List<ProducerBatch> batchList : batches.values()) {
                 for (ProducerBatch batch : batchList)
@@ -379,6 +384,7 @@ public class Sender implements Runnable {
             }
         }
 
+        //放弃超时batch
         accumulator.resetNextBatchExpiryTime();
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
@@ -416,7 +422,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
-        sendProduceRequests(batches, now);
+        sendProduceRequests(batches, now);//封装clientRequest
         return pollTimeout;
     }
 
