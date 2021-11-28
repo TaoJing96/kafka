@@ -98,7 +98,6 @@ final class InFlightRequests {
      * @return true iff we have no requests still being sent to the given node
      */
     public boolean canSendMore(String node) {
-        //没接收到ack的消息 <= 最大值
         Deque<NetworkClient.InFlightRequest> queue = requests.get(node);
         return queue == null || queue.isEmpty() ||
                (queue.peekFirst().send.completed() && queue.size() < this.maxInFlightRequestsPerConnection);

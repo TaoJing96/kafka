@@ -68,7 +68,7 @@ public class NetworkReceive implements Receive {
 
     public NetworkReceive(int maxSize, String source, MemoryPool memoryPool) {
         this.source = source;
-        this.size = ByteBuffer.allocate(4);
+        this.size = ByteBuffer.allocate(4); //4字节 消息大小+消息体
         this.buffer = null;
         this.maxSize = maxSize;
         this.memoryPool = memoryPool;
@@ -85,23 +85,27 @@ public class NetworkReceive implements Receive {
 
     @Override
     public boolean complete() {
+        //缓冲区都满了，就是没有发生拆包的情况，一个完整的返回值都已经被接收了
         return !size.hasRemaining() && buffer != null && !buffer.hasRemaining();
     }
 
     public long readFrom(ScatteringByteChannel channel) throws IOException {
         int read = 0;
         if (size.hasRemaining()) {
+            //先读取4字节的数据（它的值就是后面消息体的大小）
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
+
             if (!size.hasRemaining()) {
                 size.rewind();
-                int receiveSize = size.getInt();
+                int receiveSize = size.getInt();//获取到消息体大小
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
                 if (maxSize != UNLIMITED && receiveSize > maxSize)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + " larger than " + maxSize + ")");
+                //用于创建缓冲区来缓存接收到的返回值
                 requestedBufferSize = receiveSize; //may be 0 for some payloads (SASL)
                 if (receiveSize == 0) {
                     buffer = EMPTY_BUFFER;
@@ -109,11 +113,12 @@ public class NetworkReceive implements Receive {
             }
         }
         if (buffer == null && requestedBufferSize != -1) { //we know the size we want but havent been able to allocate it yet
-            buffer = memoryPool.tryAllocate(requestedBufferSize);
+            buffer = memoryPool.tryAllocate(requestedBufferSize); //分配存储返回值的缓冲区
             if (buffer == null)
                 log.trace("Broker low on memory - could not allocate buffer of size {} for source {}", requestedBufferSize, source);
         }
         if (buffer != null) {
+            //读取数据到缓冲区
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)
                 throw new EOFException();

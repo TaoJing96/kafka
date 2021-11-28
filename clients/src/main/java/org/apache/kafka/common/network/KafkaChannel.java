@@ -112,17 +112,17 @@ public class KafkaChannel implements AutoCloseable {
         THROTTLE_ENDED
     }
 
-    private final String id;
+    private final String id;//brokerId
     private final TransportLayer transportLayer;//封装了socketChannel
     private final Supplier<Authenticator> authenticatorCreator;
-    private Authenticator authenticator;//安全认证
+    private Authenticator authenticator;//安全认证机制
     // Tracks accumulated network thread time. This is updated on the network thread.
     // The values are read and reset after each response is sent.
     private long networkThreadTimeNanos;
     private final int maxReceiveSize;
     private final MemoryPool memoryPool;
-    private NetworkReceive receive;//接收的响应
-    private Send send;//发送的请求
+    private NetworkReceive receive;//接收到的响应
+    private Send send;//发送出去的请求
     // Track connection and mute state of channels to enable outstanding requests on channels to be
     // processed after the channel is disconnected.
     private boolean disconnected;
@@ -213,7 +213,7 @@ public class KafkaChannel implements AutoCloseable {
         if (socketChannel != null) {
             remoteAddress = socketChannel.getRemoteAddress();
         }
-        boolean connected = transportLayer.finishConnect();//完成最后的网络连接
+        boolean connected = transportLayer.finishConnect();
         if (connected) {
             if (ready()) {
                 state = ChannelState.READY;
@@ -371,8 +371,8 @@ public class KafkaChannel implements AutoCloseable {
     public void setSend(Send send) {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress, connection id is " + id);
-        this.send = send;
-        this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
+        this.send = send;//kafkaChannel缓存住
+        this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);//注册OP_WRITE事件，poll方法会真正发送请求，OP_READ事件是在连接成功的时候注册的
     }
 
     public NetworkReceive read() throws IOException {
@@ -381,7 +381,7 @@ public class KafkaChannel implements AutoCloseable {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id, memoryPool);
         }
-
+        //不断读取数据
         receive(receive);
         if (receive.complete()) {
             receive.payload().rewind();
@@ -426,10 +426,10 @@ public class KafkaChannel implements AutoCloseable {
 
     private boolean send(Send send) throws IOException {
         midWrite = true;
-        send.writeTo(transportLayer);
+        send.writeTo(transportLayer);//调用nio发送请求
         if (send.completed()) {
             midWrite = false;
-            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
+            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);//去除注册的OP_WRITE
         }
         return send.completed();
     }

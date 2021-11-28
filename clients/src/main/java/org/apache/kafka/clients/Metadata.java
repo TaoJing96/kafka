@@ -61,20 +61,20 @@ import java.util.function.Supplier;
  */
 public class Metadata implements Closeable {
     private final Logger log;
-    private final long refreshBackoffMs;//每次重新拉取元数据时间间隔
-    private final long metadataExpireMs;//元数据最大存活时间，定时重新拉取元数据
+    private final long refreshBackoffMs;
+    private final long metadataExpireMs;
     private int updateVersion;  // bumped on every metadata response
     private int requestVersion; // bumped on every new topic addition
-    private long lastRefreshMs;//上次拉取元数据时间
-    private long lastSuccessfulRefreshMs;//上次成功拉取元数据时间
-    private KafkaException fatalException;//异常信息
-    private Set<String> invalidTopics;//无效topic
-    private Set<String> unauthorizedTopics;//未授权topic
-    private MetadataCache cache = MetadataCache.empty();//缓存元数据信息
-    private boolean needUpdate;//是否需要更新元数据
-    private final ClusterResourceListeners clusterResourceListeners;//监听器，用户可以自定义监听器
-    private boolean isClosed;//是否关闭
-    private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;//上次拉取到的leader epoch信息
+    private long lastRefreshMs;
+    private long lastSuccessfulRefreshMs;
+    private KafkaException fatalException;
+    private Set<String> invalidTopics;
+    private Set<String> unauthorizedTopics;
+    private MetadataCache cache = MetadataCache.empty();
+    private boolean needUpdate;
+    private final ClusterResourceListeners clusterResourceListeners;
+    private boolean isClosed;
+    private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;
 
     /**
      * Create a new Metadata instance
@@ -232,7 +232,6 @@ public class Metadata implements Closeable {
      *     {@link #newMetadataRequestAndVersion()}.
      * @param response metadata response received from the broker
      * @param now current time in milliseconds
-     * 更新元数据
      */
     public synchronized void update(int requestVersion, MetadataResponse response, long now) {
         Objects.requireNonNull(response, "Metadata response cannot be null");
@@ -249,7 +248,7 @@ public class Metadata implements Closeable {
         this.updateVersion += 1;
 
         String previousClusterId = cache.cluster().clusterResource().clusterId();
-        //解析拉取元数据并缓存到本地
+
         this.cache = handleMetadataResponse(response, topic -> retainTopic(topic.topic(), topic.isInternal(), now));
 
         Cluster cluster = cache.cluster();
@@ -288,7 +287,6 @@ public class Metadata implements Closeable {
 
     /**
      * Transform a MetadataResponse into a new MetadataCache instance.
-     * 每次处理元数据返回新都会返回一个cache
      */
     private MetadataCache handleMetadataResponse(MetadataResponse metadataResponse,
                                                  Predicate<MetadataResponse.TopicMetadata> topicsToRetain) {

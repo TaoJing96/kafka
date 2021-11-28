@@ -60,13 +60,10 @@ final class ClusterConnectionStates {
      * @return true if we can initiate a new connection
      */
     public boolean canConnect(String id, long now) {
-        //缓存中获取节点连接状态
         NodeConnectionState state = nodeState.get(id);
         if (state == null)
-            //第一次进来
             return true;
         else
-            //连接断开 && now - 上次建立连接时间 >= 重试时间间隔
             return state.state.isDisconnected() &&
                    now - state.lastConnectAttemptMs >= state.reconnectBackoffMs;
     }

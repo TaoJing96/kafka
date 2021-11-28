@@ -234,13 +234,11 @@ public class Sender implements Runnable {
 
     /**
      * The main run loop for the sender thread
-     * sender线程主逻辑
      */
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
 
         // main loop, runs until close is called
-        //死循环 直到sender线程被关闭
         while (running) {
             try {
                 runOnce();
@@ -333,20 +331,17 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
-        //组装批次
-        long pollTimeout = sendProducerData(currentTimeMs);
-        //发送请求 处理返回值
-        client.poll(pollTimeout, currentTimeMs);
+        long pollTimeout = sendProducerData(currentTimeMs); //准备要发送的数据请求
+        client.poll(pollTimeout, currentTimeMs); //真正执行消息发送并处理返回值
     }
 
     private long sendProducerData(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
-        //获取就绪的node信息
+        //消息已封装在批次中，拿到可以发送的消息
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
-        //leader不存在 重新拉取元数据
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
             // topics which may have expired. Add the topic again to metadata to ensure it is included
@@ -360,11 +355,13 @@ public class Sender implements Runnable {
         }
 
         // remove any nodes we aren't ready to send to
-        Iterator<Node> iter = result.readyNodes.iterator();
+        Iterator<Node> iter = result.readyNodes.iterator();//保存所有成功建立连接的node
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
-            //去掉网络不通的leader节点 下次重新拉取元数据信息
+            /**
+             * 去除建立连接失败的node
+             * */
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.pollDelayMs(node, now));
@@ -372,11 +369,10 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
-        //获取要发送的批次
+        //按照目标brokerId分组
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
-            //有序消息  也就是max.in.flight.request.per.connection=1
             // Mute all the partitions drained
             for (List<ProducerBatch> batchList : batches.values()) {
                 for (ProducerBatch batch : batchList)
@@ -422,7 +418,8 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
-        sendProduceRequests(batches, now);//封装clientRequest
+        //将batches封装成request 入队
+        sendProduceRequests(batches, now);
         return pollTimeout;
     }
 
@@ -803,6 +800,7 @@ public class Sender implements Runnable {
         }
         ProduceRequest.Builder requestBuilder = ProduceRequest.Builder.forMagic(minUsedMagic, acks, timeout,
                 produceRecordsByPartition, transactionalId);
+        //注册处理返回值的回调函数
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
@@ -810,9 +808,10 @@ public class Sender implements Runnable {
         };
 
         String nodeId = Integer.toString(destination);
+        //封装客户端请求。如果ack=0则不会等待broker响应
         ClientRequest clientRequest = client.newClientRequest(nodeId, requestBuilder, now, acks != 0,
                 requestTimeoutMs, callback);
-        client.send(clientRequest, now);
+        client.send(clientRequest, now);//发送数据到kafkaChannel
         log.trace("Sent produce request to {}: {}", nodeId, requestBuilder);
     }
 
