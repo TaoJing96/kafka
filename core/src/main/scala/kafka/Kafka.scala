@@ -64,6 +64,7 @@ object Kafka extends Logging {
 
   def main(args: Array[String]): Unit = {
     try {
+      //解析启动参数
       val serverProps = getPropsFromArgs(args)
       val kafkaServerStartable = KafkaServerStartable.fromProps(serverProps)
 
@@ -80,7 +81,7 @@ object Kafka extends Logging {
       Runtime.getRuntime().addShutdownHook(new Thread("kafka-shutdown-hook") {
         override def run(): Unit = kafkaServerStartable.shutdown()
       })
-
+      //核心代码
       kafkaServerStartable.startup()
       kafkaServerStartable.awaitShutdown()
     }

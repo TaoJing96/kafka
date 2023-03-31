@@ -117,6 +117,7 @@ class SocketServer(val config: KafkaConfig,
     this.synchronized {
       connectionQuotas = new ConnectionQuotas(config, time)
       createControlPlaneAcceptorAndProcessor(config.controlPlaneListener)
+      //启动acceptor+processor线程 numNetworkThreads默认是3，也就是processor线程数
       createDataPlaneAcceptorsAndProcessors(config.numNetworkThreads, config.dataPlaneListeners)
       if (startupProcessors) {
         startControlPlaneProcessor()
@@ -220,7 +221,9 @@ class SocketServer(val config: KafkaConfig,
     endpoints.foreach { endpoint =>
       connectionQuotas.addListener(config, endpoint.listenerName)
       val dataPlaneAcceptor = createAcceptor(endpoint, DataPlaneMetricPrefix)
+      //create processor thread
       addDataPlaneProcessors(dataPlaneAcceptor, endpoint, dataProcessorsPerListener)
+      //create acceptor thread
       KafkaThread.nonDaemon(s"data-plane-kafka-socket-acceptor-${endpoint.listenerName}-${endpoint.securityProtocol}-${endpoint.port}", dataPlaneAcceptor).start()
       dataPlaneAcceptor.awaitStartup()
       dataPlaneAcceptors.put(endpoint, dataPlaneAcceptor)
@@ -239,7 +242,9 @@ class SocketServer(val config: KafkaConfig,
       listenerProcessors += controlPlaneProcessor
       controlPlaneRequestChannelOpt.foreach(_.addProcessor(controlPlaneProcessor))
       nextProcessorId += 1
+      // start processor
       controlPlaneAcceptor.addProcessors(listenerProcessors, ControlPlaneThreadPrefix)
+      //start acceptor线程
       KafkaThread.nonDaemon(s"${ControlPlaneThreadPrefix}-kafka-socket-acceptor-${endpoint.listenerName}-${endpoint.securityProtocol}-${endpoint.port}", controlPlaneAcceptor).start()
       controlPlaneAcceptor.awaitStartup()
       info(s"Created control-plane acceptor and processor for endpoint : $endpoint")
@@ -264,6 +269,7 @@ class SocketServer(val config: KafkaConfig,
       nextProcessorId += 1
     }
     listenerProcessors.foreach(p => dataPlaneProcessors.put(p.id, p))
+    //acceptor绑定processors
     acceptor.addProcessors(listenerProcessors, DataPlaneThreadPrefix)
   }
 
@@ -522,24 +528,26 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
 
   /**
    * Accept loop that checks for new connection attempts
+  acceptor run方法
    */
   def run() {
+    //NIO serverChannel 注册accept事件
     serverChannel.register(nioSelector, SelectionKey.OP_ACCEPT)
     startupComplete()
     try {
       var currentProcessorIndex = 0
       while (isRunning) {
         try {
-
+          //是否有事件
           val ready = nioSelector.select(500)
           if (ready > 0) {
-            val keys = nioSelector.selectedKeys()
+            val keys = nioSelector.selectedKeys() //就绪key
             val iter = keys.iterator()
             while (iter.hasNext && isRunning) {
               try {
                 val key = iter.next
                 iter.remove()
-
+                //是连接请求
                 if (key.isAcceptable) {
                   accept(key).foreach { socketChannel =>
 
@@ -557,6 +565,8 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
                         processors(currentProcessorIndex)
                       }
                       currentProcessorIndex += 1
+                      //调用processor.accept处理socketChannel
+                      //实际上就是遍历processor.newConnections里面put socketChannel，找到一个合适的就返回
                     } while (!assignNewConnection(socketChannel, processor, retriesLeft == 0))
                   }
                 } else
@@ -585,6 +595,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
 
   /**
   * Create a server socket to listen for connections on.
+   * 启动服务端socket
   */
   private def openServerSocket(host: String, port: Int): ServerSocketChannel = {
     val socketAddress =
@@ -756,11 +767,16 @@ private[kafka] class Processor(val id: Int,
       while (isRunning) {
         try {
           // setup any new connections that have been queued up
+          // 注册OP_READ
           configureNewConnections()
           // register any new responses for writing
+          // KafkaRequestHandler会处理request 将resp放入responseQueue里
           processNewResponses()
+          //处理客户端请求，将请求先放入stagedReceives再放入completedReceives
           poll()
+          //处理接收到的请求 再放入requestQueue中
           processCompletedReceives()
+          //处理成功发生的响应
           processCompletedSends()
           processDisconnected()
           closeExcessConnections()
@@ -888,9 +904,12 @@ private[kafka] class Processor(val id: Int,
                 val connectionId = receive.source
                 val context = new RequestContext(header, connectionId, channel.socketAddress,
                   channel.principal, listenerName, securityProtocol)
+                  //解析请求
                 val req = new RequestChannel.Request(processor = id, context = context,
                   startTimeNanos = nowNanos, memoryPool, receive.payload, requestChannel.metrics)
+                //将解析后的req发到requestQueue
                 requestChannel.sendRequest(req)
+                //移除OP_READ  准备之后返回数据
                 selector.mute(connectionId)
                 handleChannelMuteEvent(connectionId, ChannelMuteEvent.REQUEST_RECEIVED)
               }
@@ -1008,10 +1027,12 @@ private[kafka] class Processor(val id: Int,
    */
   private def configureNewConnections() {
     var connectionsProcessed = 0
+    //拿到所有socketChannel
     while (connectionsProcessed < connectionQueueSize && !newConnections.isEmpty) {
       val channel = newConnections.poll()
       try {
         debug(s"Processor $id listening to new connection from ${channel.socket.getRemoteSocketAddress}")
+        //注册OP_READ事件，这样就可以读取client发的请求
         selector.register(connectionId(channel.socket), channel)
         connectionsProcessed += 1
       } catch {

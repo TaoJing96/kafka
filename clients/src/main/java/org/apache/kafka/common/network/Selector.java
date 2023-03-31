@@ -107,8 +107,8 @@ public class Selector implements Selectable, AutoCloseable {
     private final Set<KafkaChannel> explicitlyMutedChannels;
     private boolean outOfMemory;
     private final List<Send> completedSends;//成功发送的请求
-    private final List<NetworkReceive> completedReceives;//已接收完成的响应
-    private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;//已接收但未处理的响应
+    private final List<NetworkReceive> completedReceives;//已接收完成的请求or响应（client+server都会使用这个）
+    private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;//已接收但未处理的请求or响应
     private final Set<SelectionKey> immediatelyConnectedKeys;
     private final Map<String, KafkaChannel> closingChannels;
     private Set<SelectionKey> keysWithBufferedRead;
@@ -509,6 +509,7 @@ public class Selector implements Selectable, AutoCloseable {
 
         // Add to completedReceives after closing expired connections to avoid removing
         // channels with completed receives until all staged receives are completed.
+        // stagedReceives -> completedReceives
         addToCompletedReceives();
     }
 
@@ -579,7 +580,7 @@ public class Selector implements Selectable, AutoCloseable {
                             .getAndClearResponsesReceivedDuringReauthentication();
                     responsesReceivedDuringReauthentication.forEach(receive -> addToStagedReceives(channel, receive));
                 }
-                //接收服务端的响应
+                //接收客户端的数据，然后放到请求队列中
                 attemptRead(key, channel);
 
                 if (channel.hasBytesBuffered()) {
@@ -660,7 +661,7 @@ public class Selector implements Selectable, AutoCloseable {
         if (channel.ready() && (key.isReadable() || channel.hasBytesBuffered()) && !hasStagedReceive(channel)
             && !explicitlyMutedChannels.contains(channel)) {
             NetworkReceive networkReceive;
-            //不断获取broker的响应
+            //不断获取client的请求
             while ((networkReceive = channel.read()) != null) {
                 madeReadProgressLastPoll = true;
                 addToStagedReceives(channel, networkReceive);
@@ -997,7 +998,7 @@ public class Selector implements Selectable, AutoCloseable {
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))
             stagedReceives.put(channel, new ArrayDeque<>());
-        //缓存到响应队列中
+        //缓存到请求队列中
         Deque<NetworkReceive> deque = stagedReceives.get(channel);
         deque.add(receive);
     }

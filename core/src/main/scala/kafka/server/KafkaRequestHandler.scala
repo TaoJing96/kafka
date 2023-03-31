@@ -56,6 +56,7 @@ class KafkaRequestHandler(id: Int,
       val idleTime = endTime - startSelectTime
       aggregateIdleMeter.mark(idleTime / totalHandlerThreads.get)
 
+      //处理请求
       req match {
         case RequestChannel.ShutdownRequest =>
           debug(s"Kafka request handler $id on broker $brokerId received shut down command")
@@ -66,7 +67,7 @@ class KafkaRequestHandler(id: Int,
           try {
             request.requestDequeueTimeNanos = endTime
             trace(s"Kafka request handler $id on broker $brokerId handling request $request")
-            apis.handle(request)
+            apis.handle(request) //最终处理
           } catch {
             case e: FatalExitError =>
               shutdownComplete.countDown()
