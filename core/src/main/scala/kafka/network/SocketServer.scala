@@ -773,10 +773,12 @@ private[kafka] class Processor(val id: Int,
           // KafkaRequestHandler会处理request 将resp放入responseQueue里
           processNewResponses()
           //处理客户端请求，将请求先放入stagedReceives再放入completedReceives
+          //发送响应给客户端
           poll()
           //处理接收到的请求 再放入requestQueue中
           processCompletedReceives()
           //处理成功发生的响应
+          //unmute channel 这样又可以拿到OP_READ事件 处理写请求了
           processCompletedSends()
           processDisconnected()
           closeExcessConnections()
