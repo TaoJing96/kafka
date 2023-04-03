@@ -196,6 +196,7 @@ object RollParams {
  * @param producerIdExpirationCheckIntervalMs How often to check for producer ids which need to be expired
  */
 @threadsafe
+//dir里面有多个log segment
 class Log(@volatile var dir: File,
           @volatile var config: LogConfig,
           @volatile var logStartOffset: Long,

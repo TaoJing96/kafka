@@ -60,6 +60,7 @@ object Partition {
 
 /**
  * Data structure that represents a topic partition. The leader maintains the AR, ISR, CUR, RAR
+ * topic下的一个partition
  */
 class Partition(val topicPartition: TopicPartition,
                 val isOffline: Boolean,
@@ -75,6 +76,7 @@ class Partition(val topicPartition: TopicPartition,
   def partitionId: Int = topicPartition.partition
 
   // allReplicasMap includes both assigned replicas and the future replica if there is ongoing replica movement
+  //副本集合
   private val allReplicasMap = new Pool[Int, Replica]
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock
@@ -754,6 +756,7 @@ class Partition(val topicPartition: TopicPartition,
     }
   }
 
+  //追加消息到leader
   def appendRecordsToLeader(records: MemoryRecords, origin: AppendOrigin, requiredAcks: Int): LogAppendInfo = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal match {
@@ -767,7 +770,7 @@ class Partition(val topicPartition: TopicPartition,
             throw new NotEnoughReplicasException(s"The size of the current ISR ${inSyncReplicas.map(_.brokerId)} " +
               s"is insufficient to satisfy the min.isr requirement of $minIsr for partition $topicPartition")
           }
-
+          //写入log
           val info = log.appendAsLeader(records, leaderEpoch = this.leaderEpoch, origin,
             interBrokerProtocolVersion)
 
