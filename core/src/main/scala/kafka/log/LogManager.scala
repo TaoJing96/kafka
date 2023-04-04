@@ -69,6 +69,7 @@ class LogManager(logDirs: Seq[File],
   val InitialTaskDelayMs = 30 * 1000
 
   private val logCreationOrDeletionLock = new Object
+  //每个tp对应一个log，也就是一个磁盘目录，里面包含实际log和索引
   private val currentLogs = new Pool[TopicPartition, Log]()
   // Future logs are put in the directory with "-future" suffix. Future log is created when user wants to move replica
   // from one log directory to another log directory on the same broker. The directory of the future log will be renamed
@@ -77,6 +78,7 @@ class LogManager(logDirs: Seq[File],
   // Each element in the queue contains the log object to be deleted and the time it is scheduled for deletion.
   private val logsToBeDeleted = new LinkedBlockingQueue[(Log, Long)]()
 
+  //创建dir并校验
   private val _liveLogDirs: ConcurrentLinkedQueue[File] = createAndValidateLogDirs(logDirs, initialOfflineDirs)
   @volatile private var _currentDefaultConfig = initialDefaultConfig
   @volatile private var numRecoveryThreadsPerDataDir = recoveryThreadsPerDataDir
@@ -151,6 +153,7 @@ class LogManager(logDirs: Seq[File],
         if (initialOfflineDirs.contains(dir))
           throw new IOException(s"Failed to load ${dir.getAbsolutePath} during broker startup")
 
+        //不存在就创建
         if (!dir.exists) {
           info(s"Log directory ${dir.getAbsolutePath} not found, creating it.")
           val created = dir.mkdirs()
@@ -336,12 +339,15 @@ class LogManager(logDirs: Seq[File],
             warn(s"Error occurred while reading log-start-offset-checkpoint file of directory $dir", e)
         }
 
+        //遍历
         val jobsForDir = for {
           dirContent <- Option(dir.listFiles).toList
+//          logDir对应一个topic的dir
           logDir <- dirContent if logDir.isDirectory
         } yield {
           CoreUtils.runnable {
             try {
+              //加载log对象 一个logDir有一个log对象，也就是一个topic对应一个log
               loadLog(logDir, recoveryPoints, logStartOffsets)
             } catch {
               case e: IOException =>
@@ -391,27 +397,33 @@ class LogManager(logDirs: Seq[File],
     /* Schedule the cleanup task to delete old logs */
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
+      //开启5个cron job
+      //清理过期log，需要满足时间/空间条件
       scheduler.schedule("kafka-log-retention",
                          cleanupLogs _,
                          delay = InitialTaskDelayMs,
                          period = retentionCheckMs,
                          TimeUnit.MILLISECONDS)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
+      //定时刷盘 memory -> disk
       scheduler.schedule("kafka-log-flusher",
                          flushDirtyLogs _,
                          delay = InitialTaskDelayMs,
                          period = flushCheckMs,
                          TimeUnit.MILLISECONDS)
+      //更新检查点文件，便于集群重启恢复
       scheduler.schedule("kafka-recovery-point-checkpoint",
                          checkpointLogRecoveryOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushRecoveryOffsetCheckpointMs,
                          TimeUnit.MILLISECONDS)
+      //更新检查点文件
       scheduler.schedule("kafka-log-start-offset-checkpoint",
                          checkpointLogStartOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushStartOffsetCheckpointMs,
                          TimeUnit.MILLISECONDS)
+      //删除log
       scheduler.schedule("kafka-delete-logs", // will be rescheduled after each delete logs with a dynamic period
                          deleteLogs _,
                          delay = InitialTaskDelayMs,
@@ -969,6 +981,8 @@ class LogManager(logDirs: Seq[File],
         val timeSinceLastFlush = time.milliseconds - log.lastFlushTime
         debug(s"Checking if flush is needed on ${topicPartition.topic} flush interval ${log.config.flushMs}" +
               s" last flushed ${log.lastFlushTime} time since last flush: $timeSinceLastFlush")
+        //flushMs默认是Long.MAX_VALUE => 不会主动刷盘
+        //消息会有丢失的可能
         if(timeSinceLastFlush >= log.config.flushMs)
           log.flush
       } catch {
@@ -1004,6 +1018,7 @@ object LogManager {
 
     val cleanerConfig = LogCleaner.cleanerConfig(config)
 
+    //dir为log.dirs or log.dir, log.dirs支持多个目录
     new LogManager(logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
       initialOfflineDirs = initialOfflineDirs.map(new File(_).getAbsoluteFile),
       topicConfigs = topicConfigs,

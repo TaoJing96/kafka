@@ -270,6 +270,7 @@ class Log(@volatile var dir: File,
   @volatile private var replicaHighWatermark: Option[Long] = None
 
   /* the actual segments of the log */
+  //基于跳表 可以通过offset来找到对应log文件
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
 
   // Visible for testing
@@ -877,6 +878,7 @@ class Log(@volatile var dir: File,
         checkIfMemoryMappedBufferClosed()
         if (assignOffsets) {
           // assign offsets to the message set
+          // 分配offset
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
           appendInfo.firstOffset = Some(offset.value)
           val now = time.milliseconds
@@ -898,6 +900,7 @@ class Log(@volatile var dir: File,
             case e: IOException =>
               throw new KafkaException(s"Error validating messages while appending to log $name", e)
           }
+          //有效数据
           validRecords = validateAndOffsetAssignResult.validatedRecords
           appendInfo.maxTimestamp = validateAndOffsetAssignResult.maxTimestamp
           appendInfo.offsetOfMaxTimestamp = validateAndOffsetAssignResult.shallowOffsetOfMaxTimestamp
@@ -967,6 +970,7 @@ class Log(@volatile var dir: File,
         }
 
         // maybe roll the log if this segment is full
+        // 拿到segment 如果满足条件会生成生成新的segment
         val segment = maybeRoll(validRecords.sizeInBytes, appendInfo)
 
         val logOffsetMetadata = LogOffsetMetadata(
@@ -986,7 +990,7 @@ class Log(@volatile var dir: File,
           appendInfo.logStartOffset = logStartOffset
           return appendInfo
         }
-
+        //append到segment
         segment.append(largestOffset = appendInfo.lastOffset,
           largestTimestamp = appendInfo.maxTimestamp,
           shallowOffsetOfMaxTimestamp = appendInfo.offsetOfMaxTimestamp,
@@ -998,6 +1002,7 @@ class Log(@volatile var dir: File,
         // will be cleaned up after the log directory is recovered. Note that the end offset of the
         // ProducerStateManager will not be updated and the last stable offset will not advance
         // if the append to the transaction index fails.
+        // 更新LEO
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         // update the producer state

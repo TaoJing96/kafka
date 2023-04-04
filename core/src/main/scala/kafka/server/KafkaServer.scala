@@ -239,6 +239,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
         /* start log manager */
+        //create logManager
         logManager = LogManager(config, initialOfflineDirs, zkClient, brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
         logManager.startup()
 
@@ -256,6 +257,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         socketServer.startup(startupProcessors = false)
 
         /* start replica manager */
+        //创建replica manager
         replicaManager = createReplicaManager(isShuttingDown)
         replicaManager.startup()
 
@@ -354,6 +356,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     clusterResourceListeners.onUpdate(new ClusterResource(clusterId))
   }
 
+  //
   protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager =
     new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
       brokerTopicStats, metadataCache, logDirFailureChannel)

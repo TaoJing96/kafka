@@ -154,6 +154,7 @@ class LogSegment private[log] (val log: FileRecords,
       ensureOffsetInRange(largestOffset)
 
       // append the messages
+      // append消息到memory，也就是fileChannel，由os来控制刷盘时间
       val appendedBytes = log.append(records)
       trace(s"Appended $appendedBytes to ${log.file} at end offset $largestOffset")
       // Update the in memory max timestamp and corresponding offset.
@@ -162,8 +163,11 @@ class LogSegment private[log] (val log: FileRecords,
         offsetOfMaxTimestampSoFar = shallowOffsetOfMaxTimestamp
       }
       // append an entry to the index (if needed)
+      // 更新稀疏索引 默认每4096kb就更新索引
       if (bytesSinceLastIndexEntry > indexIntervalBytes) {
+        // offset索引
         offsetIndex.append(largestOffset, physicalPosition)
+        // time索引
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar)
         bytesSinceLastIndexEntry = 0
       }
