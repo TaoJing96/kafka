@@ -498,6 +498,7 @@ class ReplicaManager(val config: KafkaConfig,
         origin, entriesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(time.milliseconds - sTime))
 
+      //封装每个tp的返回值
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
@@ -518,10 +519,12 @@ class ReplicaManager(val config: KafkaConfig,
         // try to complete the request immediately, otherwise put it into the purgatory
         // this is because while the delayed produce operation is being created, new
         // requests may arrive and hence make this operation completable.
+        // 时间轮调度，等待follower同步leader数据
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
         // we can respond immediately
+        //执行回调
         val produceResponseStatus = produceStatus.mapValues(status => status.responseStatus)
         responseCallback(produceResponseStatus)
       }
@@ -732,7 +735,7 @@ class ReplicaManager(val config: KafkaConfig,
 
   // If all the following conditions are true, we need to put a delayed produce request and wait for replication to complete
   //
-  // 1. required acks = -1
+  // 1. required acks = -1 表示成功写入所有follower,1表示写入leader，0表示不关心
   // 2. there is data to append
   // 3. at least one partition append was successful (fewer errors than partitions)
   private def delayedProduceRequestRequired(requiredAcks: Short,
@@ -749,7 +752,7 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
    * Append the messages to the local replica logs
-   * 批量写入消息 tp+records
+   * 批量写入消息 tp+records，并返回写入结果
    */
   private def appendToLocalLog(internalTopicsAllowed: Boolean,
                                origin: AppendOrigin,

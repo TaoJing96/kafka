@@ -1031,6 +1031,7 @@ class Log(@volatile var dir: File,
           s"next offset: ${nextOffsetMetadata.messageOffset}, " +
           s"and messages: $validRecords")
 
+        //条数限制 强制flush 默认Long.MaxValue 由os管理
         if (unflushedMessages >= config.flushInterval)
           flush()
 

@@ -154,7 +154,7 @@ class LogSegment private[log] (val log: FileRecords,
       ensureOffsetInRange(largestOffset)
 
       // append the messages
-      // append消息到memory，也就是fileChannel，由os来控制刷盘时间
+      // append消息到memory，也就是fileChannel，由os来控制刷盘时间 可以通过force来强制刷盘
       val appendedBytes = log.append(records)
       trace(s"Appended $appendedBytes to ${log.file} at end offset $largestOffset")
       // Update the in memory max timestamp and corresponding offset.

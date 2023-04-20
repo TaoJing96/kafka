@@ -87,6 +87,7 @@ public class MemoryRecords extends AbstractRecords {
         buffer.mark();
         int written = 0;
         while (written < sizeInBytes())
+            //直接写到channel
             written += channel.write(buffer);
         buffer.reset();
         return written;
