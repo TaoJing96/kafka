@@ -129,6 +129,7 @@ abstract class AbstractFetcherThread(name: String,
       (fetchStates, fetchRequestOpt)
     }
 
+    //处理fetch请求
     fetchRequestOpt.foreach { fetchRequest =>
       processFetchRequest(fetchStates, fetchRequest)
     }
@@ -298,6 +299,7 @@ abstract class AbstractFetcherThread(name: String,
 
     try {
       trace(s"Sending fetch request $fetchRequest")
+      //向leader partition拉取数据 ApiKeys.FETCH
       responseData = fetchFromLeader(fetchRequest)
     } catch {
       case t: Throwable =>

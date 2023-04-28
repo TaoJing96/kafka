@@ -491,6 +491,7 @@ class Partition(val topicPartition: TopicPartition,
     // check if the LW of the partition has incremented
     // since the replica's logStartOffset may have incremented
     val leaderLWIncremented = newLeaderLW > oldLeaderLW
+    // 更新ISR
     // check if we need to expand ISR to include this replica
     // if it is not in the ISR yet
     val leaderHWIncremented = maybeExpandIsr(replicaId, logReadResult)
@@ -530,6 +531,7 @@ class Partition(val topicPartition: TopicPartition,
           val fetchOffset = logReadResult.info.fetchOffsetMetadata.messageOffset
           if (!inSyncReplicas.contains(replica) &&
              assignedReplicas.map(_.brokerId).contains(replicaId) &&
+            //当前follower的LEO >= leader HW，会进入isr
              replica.logEndOffsetMetadata.offsetDiff(leaderHW) >= 0 &&
              leaderEpochStartOffsetOpt.exists(fetchOffset >= _)) {
             val newInSyncReplicas = inSyncReplicas + replica
@@ -541,6 +543,7 @@ class Partition(val topicPartition: TopicPartition,
           }
           // check if the HW of the partition can now be incremented
           // since the replica may already be in the ISR and its LEO has just incremented
+          // 取ISR最小的LEO
           maybeIncrementLeaderHW(leaderReplica, logReadResult.fetchTimeMs)
         case None => false // nothing to do if no longer leader
       }
@@ -609,6 +612,7 @@ class Partition(val topicPartition: TopicPartition,
     val allLogEndOffsets = assignedReplicas.filter { replica =>
       curTime - replica.lastCaughtUpTimeMs <= replicaLagTimeMaxMs || inSyncReplicas.contains(replica)
     }.map(_.logEndOffsetMetadata)
+    //获取最小值
     val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
     val oldHighWatermark = leaderReplica.highWatermark
 

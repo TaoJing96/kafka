@@ -104,6 +104,7 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
       else {
         val clientRequest = networkClient.newClientRequest(sourceBroker.id.toString, requestBuilder,
           time.milliseconds(), true)
+        //核心网络代码  和producer复用一套
         NetworkClientUtils.sendAndReceive(networkClient, clientRequest, time)
       }
     }

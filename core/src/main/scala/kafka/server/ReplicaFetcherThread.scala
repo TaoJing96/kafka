@@ -246,6 +246,7 @@ class ReplicaFetcherThread(name: String,
       if (fetchState.isReadyForFetch && !shouldFollowerThrottle(quota, topicPartition)) {
         try {
           val logStartOffset = replicaMgr.localReplicaOrException(topicPartition).logStartOffset
+          // fetch带上leo（logStartOffset）
           builder.add(topicPartition, new FetchRequest.PartitionData(
             fetchState.fetchOffset, logStartOffset, fetchSize, Optional.of(fetchState.currentLeaderEpoch)))
         } catch {
