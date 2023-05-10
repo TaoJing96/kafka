@@ -655,11 +655,13 @@ class Partition(val topicPartition: TopicPartition,
     replicaManager.tryCompleteDelayedDeleteRecords(requestKey)
   }
 
+  //定时更新isr 移除无效follower
   def maybeShrinkIsr(replicaMaxLagTimeMs: Long) {
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal match {
         case Some(leaderReplica) =>
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
+          //移除无效isr
           if (outOfSyncReplicas.nonEmpty) {
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
             assert(newInSyncReplicas.nonEmpty)
@@ -676,6 +678,7 @@ class Partition(val topicPartition: TopicPartition,
 
             // update ISR in zk and in cache
             updateIsr(newInSyncReplicas)
+            //更新hw
             replicaManager.isrShrinkRate.mark()
 
             // we may need to increment high watermark since ISR could be down to 1
@@ -708,6 +711,7 @@ class Partition(val topicPartition: TopicPartition,
      **/
     val candidateReplicas = inSyncReplicas - leaderReplica
 
+    //校验leo和最近10s是否拉取过数据
     val laggingReplicas = candidateReplicas.filter(r =>
       r.logEndOffset != leaderReplica.logEndOffset && (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
     if (laggingReplicas.nonEmpty)
