@@ -168,6 +168,7 @@ class KafkaController(val config: KafkaConfig,
    * elector
    */
   def startup() = {
+    //在zk controller目前注册监听器
     zkClient.registerStateChangeHandler(new StateChangeHandler {
       override val name: String = StateChangeHandlers.ControllerHandler
       override def afterInitializingSession(): Unit = {
@@ -181,7 +182,9 @@ class KafkaController(val config: KafkaConfig,
         queuedEvent.awaitProcessing()
       }
     })
+    //发Startup事件，process()会处理
     eventManager.put(Startup)
+    //开启thread 异步处理event
     eventManager.start()
   }
 
@@ -1139,6 +1142,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def processStartup(): Unit = {
+    //启动后参与elect
     zkClient.registerZNodeChangeHandlerAndCheckExistence(controllerChangeHandler)
     elect()
   }
@@ -1205,6 +1209,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def elect(): Unit = {
+    //为-1就是还没有创建过controller
     activeControllerId = zkClient.getControllerId.getOrElse(-1)
     /*
      * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential race condition,
