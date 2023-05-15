@@ -251,11 +251,13 @@ class GroupCoordinator(val brokerId: Int,
       } else if (!group.supportsProtocols(protocolType, MemberMetadata.plainProtocolSet(protocols))) {
         responseCallback(joinError(memberId, Errors.INCONSISTENT_GROUP_PROTOCOL))
       } else if (group.isPendingMember(memberId)) {
+        // consumer group还在初始化中 等待consumer发出join group请求
         // A rejoining pending member will be accepted. Note that pending member will never be a static member.
         if (groupInstanceId.isDefined) {
           throw new IllegalStateException(s"the static member $groupInstanceId was unexpectedly to be assigned " +
             s"into pending member bucket with member id $memberId")
         } else {
+          //第一个consumer是leader
           addMemberAndRebalance(rebalanceTimeoutMs, sessionTimeoutMs, memberId, groupInstanceId,
             clientId, clientHost, protocolType, protocols, group, responseCallback)
         }

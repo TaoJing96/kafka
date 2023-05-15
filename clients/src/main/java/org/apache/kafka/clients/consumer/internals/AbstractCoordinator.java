@@ -245,6 +245,7 @@ public abstract class AbstractCoordinator implements Closeable {
             return true;
 
         do {
+            //query coordinator
             final RequestFuture<Void> future = lookupCoordinator();
             client.poll(future, timer);
 
@@ -577,7 +578,7 @@ public abstract class AbstractCoordinator implements Closeable {
                         AbstractCoordinator.this.generation = new Generation(joinResponse.data().generationId(),
                                 joinResponse.data().memberId(), joinResponse.data().protocolName());
                         if (joinResponse.isLeader()) {
-                            //leader consumer才会走到这里
+                            //leader consumer才会走到这里 会指定分区消费方案
                             onJoinLeader(joinResponse).chain(future);
                         } else {
                             onJoinFollower().chain(future);
@@ -760,7 +761,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     // use MAX_VALUE - node.id as the coordinator id to allow separate connections
                     // for the coordinator in the underlying network client layer
                     int coordinatorConnectionId = Integer.MAX_VALUE - findCoordinatorResponse.data().nodeId();
-
+                    //成功找到coordinator
                     AbstractCoordinator.this.coordinator = new Node(
                             coordinatorConnectionId,
                             findCoordinatorResponse.data().host(),

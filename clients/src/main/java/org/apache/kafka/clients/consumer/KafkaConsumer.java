@@ -1215,7 +1215,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 client.maybeTriggerWakeup();
 
                 if (includeMetadataInTimeout) {
-                    //更新元数据、offset
+                    //更新元数据、offset，里面有query coordinator/join group逻辑
                     if (!updateAssignmentMetadataIfNeeded(timer)) {
                         return ConsumerRecords.empty();
                     }
