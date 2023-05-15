@@ -1582,6 +1582,7 @@ class KafkaController(val config: KafkaConfig,
         case TopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors) =>
           processTopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors)
         case BrokerChange =>
+          //broker增减event处理
           processBrokerChange()
         case BrokerModifications(brokerId) =>
           processBrokerModification(brokerId)
@@ -1594,6 +1595,7 @@ class KafkaController(val config: KafkaConfig,
         case Expire =>
           processExpire()
         case TopicChange =>
+          //处理topic更新event
           processTopicChange()
         case LogDirEventNotification =>
           processLogDirEventNotification()

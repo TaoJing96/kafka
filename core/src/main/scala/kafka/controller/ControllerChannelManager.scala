@@ -553,6 +553,7 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
 
   def sendRequestsToBrokers(controllerEpoch: Int): Unit = {
     try {
+      //通过api key来区分
       val stateChangeLog = stateChangeLogger.withControllerEpoch(controllerEpoch)
       sendLeaderAndIsrRequest(controllerEpoch, stateChangeLog)
       sendUpdateMetadataRequests(controllerEpoch, stateChangeLog)
