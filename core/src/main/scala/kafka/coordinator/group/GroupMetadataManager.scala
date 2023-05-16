@@ -420,7 +420,7 @@ class GroupMetadataManager(brokerId: Int,
               group.prepareOffsetCommit(offsetMetadata)
             }
           }
-
+          //添加到log
           appendForGroup(group, entries, putCacheCallback)
 
         case None =>

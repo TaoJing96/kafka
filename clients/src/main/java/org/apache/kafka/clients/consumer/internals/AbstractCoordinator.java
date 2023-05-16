@@ -1173,6 +1173,7 @@ public abstract class AbstractCoordinator implements Closeable {
                             // coordinator disconnected
                             AbstractCoordinator.this.wait(retryBackoffMs);
                         } else {
+                            //发送心跳
                             heartbeat.sentHeartbeat(now);
 
                             sendHeartbeatRequest().addListener(new RequestFutureListener<Void>() {

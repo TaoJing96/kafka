@@ -113,6 +113,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       request.header.apiKey match {
         //处理生产者发的消息
         case ApiKeys.PRODUCE => handleProduceRequest(request)
+        //处理follower同步数据 / consumer拉取消息
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleListOffsetRequest(request)
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
@@ -121,12 +122,14 @@ class KafkaApis(val requestChannel: RequestChannel,
         //新增broker的处理
         case ApiKeys.UPDATE_METADATA => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN => handleControlledShutdownRequest(request)
+        // 处理消费者提交偏移量
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
         //查询coordinator
         case ApiKeys.FIND_COORDINATOR => handleFindCoordinatorRequest(request)
           //处理consumer join group请求
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
+        //consumer心跳
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)

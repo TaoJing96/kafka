@@ -402,6 +402,7 @@ class GroupCoordinator(val brokerId: Int,
                       resetAndPropagateAssignmentError(group, error)
                       maybePrepareRebalance(group, s"error when storing group assignment during SyncGroup (member: $memberId)")
                     } else {
+                      //拿到consumer leader的消费方案，需要下发给所有consumer
                       setAndPropagateAssignment(group, assignment)
                       group.transitionTo(Stable)
                     }
@@ -495,6 +496,7 @@ class GroupCoordinator(val brokerId: Int,
     groupErrors
   }
 
+  //更新下一次最晚心跳时间
   def handleHeartbeat(groupId: String,
                       memberId: String,
                       groupInstanceId: Option[String],
@@ -630,6 +632,7 @@ class GroupCoordinator(val brokerId: Int,
       } else {
         val member = group.get(memberId)
         completeAndScheduleNextHeartbeatExpiration(group, member)
+        //store offset
         groupManager.storeOffsets(group, memberId, offsetMetadata, responseCallback)
       }
     }
@@ -780,6 +783,7 @@ class GroupCoordinator(val brokerId: Int,
     completeAndScheduleNextExpiration(group, member, member.sessionTimeoutMs)
   }
 
+  //利用时间轮，开启延时任务 检查是否有过期consumer
   private def completeAndScheduleNextExpiration(group: GroupMetadata, member: MemberMetadata, timeoutMs: Long): Unit = {
     val memberKey = MemberKey(member.groupId, member.memberId)
 
