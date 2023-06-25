@@ -24,6 +24,9 @@ import org.apache.kafka.common.utils.Time
 
 import scala.math._
 
+/**
+ * 任务链表，是双向队列，对应一层中的一个bucket
+ * */
 @threadsafe
 private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
 
@@ -34,6 +37,7 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
   root.next = root
   root.prev = root
 
+  //当前bucket的过期时间，用来判断是不是要下沉到下一层
   private[this] val expiration = new AtomicLong(-1L)
 
   // Set the bucket's expiration time
@@ -132,6 +136,10 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
 
 }
 
+/**
+ * @param timerTask 代表一个具体的定时任务
+ * @param expirationMs 任务过期时间，就是任务必须在这之前完成
+ * */
 private[timer] class TimerTaskEntry(val timerTask: TimerTask, val expirationMs: Long) extends Ordered[TimerTaskEntry] {
 
   @volatile

@@ -96,18 +96,36 @@ import java.util.concurrent.atomic.AtomicInteger
  * This class is not thread-safe. There should not be any add calls while advanceClock is executing.
  * It is caller's responsibility to enforce it. Simultaneous add calls are thread-safe.
  */
+/**
+ 这里是代表一层的时间轮
+ * @param tickMs 指针转动一次的时间，第一层是1ms
+ * @param startMs 时间轮对象创建时间
+ * @param wheelSize 时间轮bucket数量，例如时钟就是60个bucket
+ * @param taskCounter bucket任务数量
+ * @param queue 延时任务队列，存放的是TimerTaskList，如果有下一层时间轮，那么他们会共用一个queue
+ * */
 @nonthreadsafe
 private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, taskCounter: AtomicInteger, queue: DelayQueue[TimerTaskList]) {
 
+  //每层时间轮总时长，就是格数*每格时长 例如时钟就是60*1min
   private[this] val interval = tickMs * wheelSize
   private[this] val buckets = Array.tabulate[TimerTaskList](wheelSize) { _ => new TimerTaskList(taskCounter) }
 
+  /**
+   * 时间轮当前时间
+   * 例如tickMs = 40, startMs = 125, 那么currentTime = 125 - 125 % 40 = 120
+   * 这样会有一点误差，startMs = 125 和startMs = 129的currentTime一致
+   */
   private[this] var currentTime = startMs - (startMs % tickMs) // rounding down to multiple of tickMs
 
   // overflowWheel can potentially be updated and read by two concurrent threads through add().
   // Therefore, it needs to be volatile due to the issue of Double-Checked Locking pattern with JVM
   @volatile private[this] var overflowWheel: TimingWheel = null
 
+  /**
+   * 创建下一层时间轮，当前层放不下，没一层时间轮都引用了下一层时间轮
+   * 下一层时间轮的tickMs等于当前层的总时长
+   * */
   private[this] def addOverflowWheel(): Unit = {
     synchronized {
       if (overflowWheel == null) {
@@ -155,6 +173,9 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
   }
 
   // Try to advance the clock
+  /**
+   * 有异步线程去推进时钟，如果有下一层时间轮的话也需要推进
+   * */
   def advanceClock(timeMs: Long): Unit = {
     if (timeMs >= currentTime + tickMs) {
       currentTime = timeMs - (timeMs % tickMs)

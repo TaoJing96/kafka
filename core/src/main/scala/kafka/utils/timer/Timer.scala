@@ -100,13 +100,17 @@ class SystemTimer(executorName: String,
   /*
    * Advances the clock if there is an expired bucket. If there isn't any expired bucket when called,
    * waits up to timeoutMs before giving up.
+   * timeoutMs默认200
    */
   def advanceClock(timeoutMs: Long): Boolean = {
+    //延时队列有任务代表可以推进时间轮了，这里如果不用延时队列需要遍历每个bucket，如果某些bucket没有任务的话会空转
+    //delayQueue存储了所有层时间轮的bucket
     var bucket = delayQueue.poll(timeoutMs, TimeUnit.MILLISECONDS)
     if (bucket != null) {
       writeLock.lock()
       try {
         while (bucket != null) {
+          //时针往下走
           timingWheel.advanceClock(bucket.getExpiration())
           bucket.flush(reinsert)
           bucket = delayQueue.poll()
