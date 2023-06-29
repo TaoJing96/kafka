@@ -331,7 +331,7 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
-        long pollTimeout = sendProducerData(currentTimeMs); //准备要发送的数据请求
+        long pollTimeout = sendProducerData(currentTimeMs); //准备要发送的数据请求并缓存到channel里
         client.poll(pollTimeout, currentTimeMs); //真正执行消息发送并处理返回值
     }
 

@@ -35,11 +35,11 @@ public class NetworkReceive implements Receive {
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
 
     private final String source;
-    private final ByteBuffer size;
+    private final ByteBuffer size; //用来存储消息体大小
     private final int maxSize;
     private final MemoryPool memoryPool;
     private int requestedBufferSize = -1;
-    private ByteBuffer buffer;
+    private ByteBuffer buffer; //用来存储实际消息体
 
 
     public NetworkReceive(String source, ByteBuffer buffer) {
@@ -92,8 +92,8 @@ public class NetworkReceive implements Receive {
     public long readFrom(ScatteringByteChannel channel) throws IOException {
         int read = 0;
         if (size.hasRemaining()) {
-            //先读取4字节的数据（它的值就是后面消息体的大小）
-            int bytesRead = channel.read(size);
+            //先读取4字节的数据（它的值就是后面消息体的大小），如果发生size的拆包则会多次读取
+            int bytesRead = channel.read(size); //读取数据从channel到size，根据size剩余空间读取
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;

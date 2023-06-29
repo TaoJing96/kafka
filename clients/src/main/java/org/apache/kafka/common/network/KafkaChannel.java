@@ -381,7 +381,7 @@ public class KafkaChannel implements AutoCloseable {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id, memoryPool);
         }
-        //不断读取数据
+        //不断读取数据 如果发生拆包则等到下一次read继续读取
         receive(receive);
         if (receive.complete()) {
             receive.payload().rewind();
