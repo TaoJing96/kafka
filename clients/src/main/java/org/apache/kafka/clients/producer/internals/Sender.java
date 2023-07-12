@@ -302,6 +302,7 @@ public class Sender implements Runnable {
                 transactionManager.resetProducerIdIfNeeded();
 
                 if (!transactionManager.isTransactional()) {
+                    //开启了exactly once但没有开启tx
                     // this is an idempotent producer, so make sure we have a producer id
                     maybeWaitForProducerId();
                 } else if (transactionManager.hasUnresolvedSequences() && !transactionManager.hasFatalError()) {
@@ -444,6 +445,7 @@ public class Sender implements Runnable {
                 accumulator.beginFlush();
         }
 
+        //第一次拿到的是InitProducerId的RequestHandler
         TransactionManager.TxnRequestHandler nextRequestHandler = transactionManager.nextRequestHandler(accumulator.hasIncomplete());
         if (nextRequestHandler == null)
             return false;
@@ -453,6 +455,7 @@ public class Sender implements Runnable {
         try {
             targetNode = awaitNodeReady(nextRequestHandler.coordinatorType());
             if (targetNode == null) {
+                //发出lookupCoordinator请求，然后再会把InitProducerId重新入队，下次就不会走到这个分支
                 lookupCoordinatorAndRetry(nextRequestHandler);
                 return true;
             }

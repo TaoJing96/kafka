@@ -998,6 +998,7 @@ public class TransactionManager {
             State targetState) {
         ensureTransactional();
 
+        //第一次init的时候(InitProducerId)不会走到这里 pendingResult为null
         if (pendingResult != null && currentState == targetState) {
             TransactionalRequestResult result = pendingResult;
             if (result.isCompleted())
@@ -1050,6 +1051,7 @@ public class TransactionManager {
         }
 
         @Override
+        //client在收到response的时候会调用该函数
         public void onComplete(ClientResponse response) {
             if (response.requestHeader().correlationId() != inFlightRequestCorrelationId) {
                 fatalError(new RuntimeException("Detected more than one in-flight transactional request."));
@@ -1124,11 +1126,13 @@ public class TransactionManager {
         }
 
         @Override
+        //在收到response的时候会调用 调用cdl.count()
         public void handleResponse(AbstractResponse response) {
             InitProducerIdResponse initProducerIdResponse = (InitProducerIdResponse) response;
             Errors error = initProducerIdResponse.error();
 
             if (error == Errors.NONE) {
+                //更新productId和epoch
                 ProducerIdAndEpoch producerIdAndEpoch = new ProducerIdAndEpoch(initProducerIdResponse.data.producerId(),
                         initProducerIdResponse.data.producerEpoch());
                 setProducerIdAndEpoch(producerIdAndEpoch);
@@ -1136,6 +1140,7 @@ public class TransactionManager {
                 lastError = null;
                 result.done();
             } else if (error == Errors.NOT_COORDINATOR || error == Errors.COORDINATOR_NOT_AVAILABLE) {
+                //coordinator不可用先lookup再将InitProducerIdRequest重新入队
                 lookupCoordinator(FindCoordinatorRequest.CoordinatorType.TRANSACTION, transactionalId);
                 reenqueue();
             } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS || error == Errors.CONCURRENT_TRANSACTIONS) {

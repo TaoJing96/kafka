@@ -65,6 +65,7 @@ public final class TransactionalRequestResult {
 
     public void await(long timeout, TimeUnit unit) {
         try {
+            //等待InitProducerIdRequest的response
             boolean success = latch.await(timeout, unit);
             if (!isSuccessful()) {
                 throw error();

@@ -389,6 +389,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
 
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+            //初始化txManager
             this.transactionManager = configureTransactionState(config, logContext, log);
             int deliveryTimeoutMs = configureDeliveryTimeout(config, log);
 
@@ -508,10 +509,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         TransactionManager transactionManager = null;
 
         boolean userConfiguredIdempotence = false;
+        //是否开启exactly once
         if (config.originals().containsKey(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG))
             userConfiguredIdempotence = true;
 
         boolean userConfiguredTransactions = false;
+        //设置transactionalId必须设置exactly once
         if (config.originals().containsKey(ProducerConfig.TRANSACTIONAL_ID_CONFIG))
             userConfiguredTransactions = true;
 
@@ -619,6 +622,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         throwIfNoTransactionManager();
         throwIfProducerClosed();
         TransactionalRequestResult result = transactionManager.initializeTransactions();
+        //唤醒sender发InitProducerIdRequest给broker
         sender.wakeup();
         result.await(maxBlockTimeMs, TimeUnit.MILLISECONDS);
     }
