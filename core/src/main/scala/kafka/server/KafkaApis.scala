@@ -125,7 +125,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         // 处理消费者提交偏移量
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
-        //查询coordinator
+        //查询coordinator 有可能是transaction producer或者consumer发起的
         case ApiKeys.FIND_COORDINATOR => handleFindCoordinatorRequest(request)
           //处理consumer join group请求
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
