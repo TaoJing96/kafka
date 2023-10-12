@@ -112,6 +112,8 @@ class SystemTimer(executorName: String,
         while (bucket != null) {
           //时针往下走
           timingWheel.advanceClock(bucket.getExpiration())
+          //再次调用addTimerTaskEntry发现expired则会执行onCompleted()，也就是真正的逻辑
+          //这个bucket里面不一定是所有的taskEntry都到期，没有的又会重新放到bucket里
           bucket.flush(reinsert)
           bucket = delayQueue.poll()
         }
