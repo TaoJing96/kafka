@@ -869,6 +869,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Implementation of asynchronously send a record to a topic.
+     * callback会在handleProduceResponse里调用
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
         TopicPartition tp = null;
